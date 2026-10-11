@@ -14,8 +14,6 @@ Chrome CDP-based MCP server. Connects to the user's **real running browser**
 
 ## Structure
 
-```text
-cdp-browser-mcp/
 ├── AGENTS.md                  # this file — identical on main and dev
 ├── README.md / CHANGELOG.md / CONTRIBUTING.md / LICENSE
 ├── extension/                 # MV3 scaffold (bridge lands v5.1) — ships on main, code only
@@ -36,6 +34,8 @@ Dev-only material (`_archive/`, `.research/`, hooks, agent scratch) lives on
 the **dev branch only** — it is deleted at every promote and never on main.
 
 ## Where to look
+
+| Task | Location |
 |---|---|
 | Add/change a tool | `MCP Server/src/tools/<name>.ts` + `registry.ts`, follow `base-tool.ts` (`defineTool`) |
 | Change connection/reconnect | `MCP Server/src/connection/{cdp-client,health-monitor,browser-discovery}.ts` |
