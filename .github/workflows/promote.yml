@@ -1,0 +1,105 @@
+name: Promote dev to main
+
+# Automated dev → main promotion. Run manually from the Actions tab.
+# Only this workflow (or the release manager, by hand) writes to main.
+#
+# Why explicit delete + sync instead of .gitignore:
+#   .gitignore only affects UNTRACKED files. A merge brings tracked files
+#   along no matter what any .gitignore says. So this workflow:
+#   1. Merges origin/dev into main (--no-ff, --no-commit).
+#   2. Syncs main's .gitignore from dev's .main.gitignore when the
+#      shadow copy changed on dev (the sanctioned edit path while
+#      working on dev — main's live file is never touched there).
+#   3. Deletes dev-only paths explicitly (the enforcement), including
+#      the shadow copy itself — .main.gitignore never ships to main.
+#   4. Aborts on any OTHER conflict (human resolves, then re-run).
+#   5. Commits and pushes to main. guard-main.yml verifies afterwards.
+#
+# Manual equivalent (if you ever promote by hand):
+#   git checkout main && git pull
+#   git merge --no-ff --no-commit origin/dev
+#   if git diff --cached --quiet -- .main.gitignore; then :; else
+#     git show :.main.gitignore > .gitignore && git add .gitignore
+#   fi
+#   git rm -r -q _archive .research .githooks .main.gitignore \
+#     .github/AGENTS.md .github/copilot-instructions.md 2>/dev/null || true
+#   git diff --name-only --diff-filter=U   # must be empty; else resolve by hand
+#   git commit -m "Merge dev → main: <version>" && git push
+#
+# Main and dev need different .gitignore content, so dev carries a shadow
+# copy (.main.gitignore) holding the exact file main must have. At promote
+# time the sync step below copies it over only when dev changed it; the
+# shadow copy itself is then deleted — it never ships to main.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for the merge commit (e.g. v5.0.0-alpha.4)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge dev (no commit yet)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin dev
+          git merge --no-ff --no-commit origin/dev || true
+
+      - name: Sync .gitignore from dev shadow copy (when dev changed it)
+        run: |
+          if git diff --cached --quiet -- .main.gitignore; then
+            echo "No .main.gitignore change on dev — keeping main's .gitignore."
+          else
+            echo "Dev changed .main.gitignore — syncing to main's .gitignore."
+            git show :.main.gitignore > .gitignore
+            git add .gitignore
+          fi
+
+      - name: Strip dev-only material (explicit — .gitignore cannot do this)
+        run: |
+          git rm -r -q _archive .research .githooks .main.gitignore \
+            .github/AGENTS.md .github/copilot-instructions.md 2>/dev/null || true
+          echo "── remaining tracked dev-paths (must be empty) ──"
+          git ls-files "_archive" ".research" ".githooks" ".main.gitignore" \
+            ".github/AGENTS.md" ".github/copilot-instructions.md"
+          echo "── working-tree check ──"
+          git status --short
+          test ! -e _archive
+          test ! -e .research
+          test ! -e .githooks
+          test ! -e .main.gitignore
+
+      - name: Abort on any other conflict (resolve by hand, then re-run)
+        run: |
+          conflicts=$(git diff --name-only --diff-filter=U || true)
+          if [ -n "$conflicts" ]; then
+            echo "❌ Merge conflicts outside dev-only paths — aborting, resolve manually:"
+            echo "$conflicts"
+            git merge --abort
+            exit 1
+          fi
+          echo "✅ No residual conflicts."
+
+      - name: Commit and push to main
+        run: |
+          git status --short
+          if git diff --cached --quiet; then
+            git commit --allow-empty -m "Merge dev → main: ${{ inputs.version }}"
+          else
+            git commit -m "Merge dev → main: ${{ inputs.version }}"
+          fi
+          git push origin HEAD:main

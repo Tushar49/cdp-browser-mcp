@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch Chrome with consistent debugging port + user-data-dir.
-# See .research/ConnectionTokenInvestigation.md for why this exists.
+# See _archive/research/ConnectionTokenInvestigation.md for why this exists.
 
 set -euo pipefail
 

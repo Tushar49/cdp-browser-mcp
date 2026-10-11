@@ -1,0 +1,61 @@
+name: Release
+
+# Tagged releases only, from main only. Creates a GitHub Release with
+# the built dist/ attached. Dev branch can never cut a release.
+#
+# Usage:
+#   1. Promote dev → main (promote.yml, gives main the release version).
+#   2. Tag main:  git tag vX.Y.Z && git push origin vX.Y.Z
+#   3. This workflow builds, attaches dist/, and publishes the Release.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Refuse release if tag is not on main
+        run: |
+          git fetch origin main --depth=50
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "❌ Tag $GITHUB_REF_NAME is not on main. Releases ship from main only."
+            exit 1
+          fi
+          echo "✅ Tag $GITHUB_REF_NAME is on main."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'MCP Server/package-lock.json'
+
+      - run: npm ci
+        working-directory: MCP Server
+
+      - run: npm run typecheck
+        working-directory: MCP Server
+
+      - run: npm run build
+        working-directory: MCP Server
+
+      - name: Package dist
+        run: |
+          cd "MCP Server"
+          tar -czf ../cdp-browser-mcp-dist-${{ github.ref_name }}.tar.gz dist/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: cdp-browser-mcp-dist-${{ github.ref_name }}.tar.gz
+          generate_release_notes: true

@@ -50,4 +50,4 @@ Full activation is multi-session work. The scaffold lets us:
 - Keep the test-shape regression test green (validates scenario format on every `npm test`)
 - Hand off to a focused session later
 
-See `.research/BACKLOG.md` entry **E** for the activation plan.
+See `_archive/research/BACKLOG.md` entry **E** for the activation plan.

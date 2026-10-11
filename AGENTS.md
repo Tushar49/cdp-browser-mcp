@@ -26,6 +26,9 @@ Chrome CDP-based MCP server. Connects to the user's **real running browser**
 │   ├── src/utils/             # wait, retry, errors, response builder
 │   ├── src/__tests__/         # unit + integration + benchmarks
 │   └── server.js              # REMOVED on dev (parked: _archive/legacy-server-v4.js)
+│
+│   NOTE: `_archive/legacy-server-v4.js` stays on dev only — promote.yml
+│   strips `_archive/` at merge time, so main's tree/registry never sees it.
 ├── .github/workflows/         # ci.yml, guard-main.yml, promote.yml, release.yml
 └── .github/ISSUE_TEMPLATE|PULL_REQUEST_TEMPLATE  # contributor templates
 ```
@@ -67,7 +70,7 @@ Always:
 5. Version bumps only via release flow (package.json + `VERSION` in `src/index.ts` together).
 
 Never:
-1. Don't touch `server.js` (legacy, frozen).
+1. Don't run `_archive/legacy-server-v4.js` (frozen, reference only).
 2. No global mutable state — everything through `ServerContext` DI.
 3. No swallowed errors — `ActionableError` with fix suggestions.
 4. No `any` without a justifying comment.
