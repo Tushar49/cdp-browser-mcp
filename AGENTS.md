@@ -87,12 +87,17 @@ Never:
   guard + installer), and keeps its own `.gitignore` (no `_archive/`/
   `.research/`/`.githooks/` rules). Dev never cuts releases; CI runs
   typecheck + build + unit tests on every dev push.
-- **`.gitignore` is branch-divergent by design.** main's copy always wins at
-  promote time (`git checkout HEAD -- .gitignore`). If dev adds a *shared*
-  rule, mirror it to main in the same cycle — don't let them drift.
+- **`.gitignore` is branch-divergent by design.** main's copy is what ships.
+  While working on dev, edit the shadow copy `.main.gitignore` (tracked on
+  dev only) instead of `.gitignore` — at promote time it is copied over
+  main's file (only when it changed) and the shadow copy itself is deleted,
+  so it never lands on main. If dev adds a *shared* rule, it belongs in
+  `.main.gitignore`. `guard-main.yml` fails if `.main.gitignore` reappears
+  on main.
 - **Promote flow (dev → main):** Actions → "Promote dev to main" workflow,
   or manually: `git merge --no-ff --no-commit origin/dev` →
-  `git rm -r _archive .research .githooks .github/AGENTS.md .github/copilot-instructions.md`
+  sync `.gitignore` from `.main.gitignore` when it changed →
+  `git rm -r _archive .research .githooks .main.gitignore .github/AGENTS.md .github/copilot-instructions.md`
   → restore main's `.gitignore` → verify `git status` shows no strays →
   commit `Merge dev → main: <version>`. `.gitignore` alone never blocks a
   merge (it only affects untracked files) — deletion is explicit, policy

@@ -19,7 +19,7 @@ jobs:
       - name: Fail if dev-only paths are tracked on main
         run: |
           leak=""
-          for p in "_archive" ".research" ".githooks" ".github/AGENTS.md" ".github/copilot-instructions.md"; do
+          for p in "_archive" ".research" ".githooks" ".main.gitignore" ".github/AGENTS.md" ".github/copilot-instructions.md"; do
             n=$(git ls-files "$p" | wc -l)
             if [ "$n" -gt 0 ]; then
               echo "❌ FORBIDDEN on main: $p ($n file(s))"
