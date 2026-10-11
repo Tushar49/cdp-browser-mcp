@@ -9,7 +9,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Tushar49/cdp-browser-mcp-server.git"
+    "url": "https://github.com/Tushar49/cdp-browser-mcp.git"
   },
   "keywords": [
     "mcp",
@@ -27,7 +27,6 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "start:legacy": "node server.js",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -6,7 +6,7 @@ This is a Chrome DevTools Protocol (CDP) based MCP server that connects to the u
 **Version:** 5.0.0-alpha.3
 **Architecture:** TypeScript, modular (38 files in src/)
 **Entry point:** `MCP Server/dist/index.js` (built from `MCP Server/src/index.ts`)
-**Legacy fallback:** `MCP Server/server.js` (v4.13.0, will be removed in v5.0.0 stable)
+**Legacy fallback:** removed on dev (frozen v4 monolith parked at `_archive/legacy-server-v4.js`, reference only)
 
 ## Build & Test Commands
 ```bash
@@ -14,7 +14,6 @@ cd "MCP Server"
 npm run build        # TypeScript compile (tsc)
 npm run typecheck    # Type-check without emitting (tsc --noEmit)
 npm run start        # Start new v5 server
-npm run start:legacy # Start old v4 server (server.js)
 npm run test         # Run vitest tests
 npm run lint         # Typecheck (tsc --noEmit)
 ```
@@ -31,7 +30,7 @@ npm run lint         # Typecheck (tsc --noEmit)
 7. Add `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>` to commits
 
 ### Never
-1. Don't modify server.js (legacy, frozen for backward compat)
+1. Don't run `_archive/legacy-server-v4.js` (frozen v4, reference only)
 2. Don't add global mutable state — use ServerContext DI
 3. Don't swallow errors — use ActionableError with fix suggestions
 4. Don't use `any` without a comment explaining why

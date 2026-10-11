@@ -145,8 +145,8 @@ google-chrome --remote-debugging-port=9222
 ### Step 2: Clone & Install
 
 ```bash
-git clone https://github.com/Tushar49/cdp-browser-mcp-server.git
-cd cdp-browser-mcp-server/MCP\ Server
+git clone https://github.com/Tushar49/cdp-browser-mcp.git
+cd cdp-browser-mcp/MCP\ Server
 npm install
 npm run build
 ```
@@ -238,7 +238,7 @@ Add to `.cursor/mcp.json` in your project:
 node "MCP Server/dist/index.js"
 ```
 
-The server communicates over stdio using the MCP protocol. Any MCP-compatible client can connect. Legacy `server.js` still works via `npm run start:legacy`.
+The server communicates over stdio using the MCP protocol. Any MCP-compatible client can connect. The frozen v4 monolith is parked at `_archive/legacy-server-v4.js` (reference only — do not run it).
 
 </details>
 
@@ -613,7 +613,7 @@ Tool names are **Playwright-compatible** — agents that already know Playwright
 
 ```
 MCP Server/
-├── server.js                    # Legacy entry point (npm run start:legacy)
+├── _archive/legacy-server-v4.js  # frozen v4 monolith (reference only)
 ├── src/
 │   ├── index.ts                 # Main entry point
 │   ├── config.ts                # Environment variables & constants

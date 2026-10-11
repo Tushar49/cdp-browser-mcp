@@ -11,7 +11,7 @@ This is the extension skeleton. The actual CDP bridge is planned for v5.1.0.
 3. No chrome://flags or --remote-debugging-port needed
 
 ## Development
-See `.research/ExtensionModePlan.md` for the full design.
+Active bridge work happens on the `dev` branch; the full design doc ships there.
 
 ## Phases
 - [x] Phase A: Extension skeleton (manifest, service worker, popup)
