@@ -1,0 +1,91 @@
+name: Promote dev to main
+
+# Automated dev → main promotion. Run manually from the Actions tab.
+# Only this workflow (or the release manager, by hand) writes to main.
+#
+# Why explicit delete + restore instead of .gitignore:
+#   .gitignore only affects UNTRACKED files. A merge brings tracked files
+#   along no matter what any .gitignore says. So this workflow:
+#   1. Merges origin/dev into main (--no-ff, --no-commit).
+#   2. Deletes dev-only paths explicitly (the enforcement).
+#   3. Restores main's own .gitignore (branch-divergent by design —
+#      dev's copy must never overwrite it; see root AGENTS.md).
+#   4. Aborts on any OTHER conflict (human resolves, then re-run).
+#   5. Commits and pushes to main. guard-main.yml verifies afterwards.
+#
+# Manual equivalent (if you ever promote by hand):
+#   git checkout main && git pull
+#   git merge --no-ff --no-commit origin/dev
+#   git rm -r -q _archive .research .githooks .github/AGENTS.md .github/copilot-instructions.md 2>/dev/null || true
+#   git checkout HEAD -- .gitignore   # main's copy always wins
+#   git diff --name-only --diff-filter=U   # must be empty; else resolve by hand
+#   git commit -m "Merge dev → main: <version>" && git push
+#
+# Note: .gitignore is branch-divergent by design (main ignores _archive/
+# and .research/; dev tracks them). The restore step above keeps main's
+# copy authoritative — if dev adds a shared ignore rule, mirror it to
+# main in the same cycle (see root AGENTS.md → Branch policy).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for the merge commit (e.g. v5.0.0-alpha.4)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge dev (no commit yet)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin dev
+          git merge --no-ff --no-commit origin/dev || true
+
+      - name: Strip dev-only material (explicit — .gitignore cannot do this)
+        run: |
+          git rm -r -q _archive .research .githooks \
+            .github/AGENTS.md .github/copilot-instructions.md 2>/dev/null || true
+          # main's .gitignore always wins (branch-divergent by design)
+          git checkout HEAD -- .gitignore
+          echo "── remaining tracked dev-paths (must be empty) ──"
+          git ls-files "_archive" ".research" ".githooks" \
+            ".github/AGENTS.md" ".github/copilot-instructions.md"
+          echo "── working-tree check ──"
+          git status --short
+          test ! -e _archive
+          test ! -e .research
+          test ! -e .githooks
+
+      - name: Abort on any other conflict (resolve by hand, then re-run)
+        run: |
+          conflicts=$(git diff --name-only --diff-filter=U || true)
+          if [ -n "$conflicts" ]; then
+            echo "❌ Merge conflicts outside dev-only paths — aborting, resolve manually:"
+            echo "$conflicts"
+            git merge --abort
+            exit 1
+          fi
+          echo "✅ No residual conflicts."
+
+      - name: Commit and push to main
+        run: |
+          git status --short
+          if git diff --cached --quiet; then
+            git commit --allow-empty -m "Merge dev → main: ${{ inputs.version }}"
+          else
+            git commit -m "Merge dev → main: ${{ inputs.version }}"
+          fi
+          git push origin HEAD:main

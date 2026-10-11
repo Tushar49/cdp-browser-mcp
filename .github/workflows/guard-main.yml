@@ -1,0 +1,35 @@
+name: Guard main
+
+# Fail any push/PR to main that (re)introduces dev-only material.
+# The promote workflow deletes these paths anyway — this guard is the
+# backstop that stops them from landing on main directly or via merge.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail if dev-only paths are tracked on main
+        run: |
+          leak=""
+          for p in "_archive" ".research" ".githooks" ".github/AGENTS.md" ".github/copilot-instructions.md"; do
+            n=$(git ls-files "$p" | wc -l)
+            if [ "$n" -gt 0 ]; then
+              echo "❌ FORBIDDEN on main: $p ($n file(s))"
+              git ls-files "$p"
+              leak=1
+            fi
+          done
+          if [ -n "$leak" ]; then
+            echo ""
+            echo "main is public. Keep dev-only material on the dev branch (see root AGENTS.md → Branch policy)."
+            exit 1
+          fi
+          echo "✅ main is clean — no _archive/, .research/, .githooks/, or agent instruction files."

@@ -23,7 +23,7 @@ npm run test
 
 ## Architecture
 
-See `.github/copilot-instructions.md` for full architecture guide.
+See `AGENTS.md` (repo root) for the full contributor and agent guide.
 
 Key principles:
 - **DI via ServerContext** — no global mutable state
