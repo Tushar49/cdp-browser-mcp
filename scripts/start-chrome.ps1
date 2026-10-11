@@ -39,7 +39,7 @@
   About the persistent "Chrome is being controlled" infobar:
   This is enforced by Chrome and CANNOT be hidden in stable builds.
   --disable-blink-features=AutomationControlled only hides navigator.webdriver,
-  not the infobar. See .research/ConnectionTokenInvestigation.md.
+  not the infobar. See _archive/research/ConnectionTokenInvestigation.md.
 #>
 
 [CmdletBinding()]

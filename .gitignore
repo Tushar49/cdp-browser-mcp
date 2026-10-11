@@ -1,32 +1,87 @@
-# Dependencies
+# ══════════════════════════════════════════════════════════════
+# CDP Browser MCP — .gitignore (DEV branch)
+# Branch policy: dev tracks everything main has PLUS _archive/
+# (dev-only plans/research/diagnosis), .research/ (active analysis
+# being written now; parked under _archive/ when done), .githooks/
+# (pre-commit guard + installer), and agent guides
+# (.github/AGENTS.md, .github/copilot-instructions.md). None of those
+# ship to main — the promote workflow strips them at merge time.
+# See root AGENTS.md → "Branch policy".
+# (Main branch uses the same filename with different content —
+#  _archive/, .research/, .githooks/ ignored there.)
+# ══════════════════════════════════════════════════════════════
+
+# ── Dependencies (never commit) ──
 node_modules/
+**/node_modules/
 
-# Build output
+# ── Build output (never commit; releases ship dist/ via CI) ──
 dist/
+**/dist/
+**/build/
+**/coverage/
 
-# Temp files
+# ── Temp / scratch ──
 temp/
 tmp/
 .temp/
 .playwright-mcp/
+*.tmp
+*.temp
+*.bak
+*.orig
+*~
+*.swp
+*.swo
 
-# Prompts / planning docs
+# ── Prompts / planning docs (local-only) ──
 .prompts/
 
-# Audit/summary files (never commit)
+# ── Audit/summary files (never commit) ──
 PHASE_*
 *_AUDIT*
 *_SUMMARY*
 
-# OS files
-Thumbs.db
-.DS_Store
-
-# Editor
-.vscode/
-*.swp
-*.swo
-
-# Logs
+# ── Test / debug output ──
 *.log
 npm-debug.log*
+**/*.py[cod]
+**/__pycache__/
+**/.venv/
+
+# ── Local secrets (never commit) ──
+.env
+
+# ── OS files ──
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# ── Local agent/tool state (never commit) ──
+# Patterns mirror the hardened userscripts repo convention
+.omo/
+**/.omo/
+**/.codegraph/
+**/.taco/
+**/.opencode/
+**/.opencode-cache/
+**/.codex/
+**/.continue/
+**/.kilocode/
+**/.roo/
+**/.qoder/
+**/.trae/
+**/.claude/
+**/.gemini/
+**/.cursor/
+**/.windsurf/
+**/.aider*
+**/.muse/
+**/opencode.log
+
+# ── Local editor / IDE state (never commit) ──
+.vscode/
+**/.vscode/
+**/.idea/
+**/.history/
+**/.vs/

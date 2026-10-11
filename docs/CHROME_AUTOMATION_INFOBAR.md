@@ -44,4 +44,4 @@ Most users adapt by:
 
 ## Investigation log
 
-See `.research/ConnectionTokenInvestigation.md` for the full investigation that led to this doc. Short version: there is no token, no flag, no policy that removes this infobar. We tried.
+See `_archive/research/ConnectionTokenInvestigation.md` for the full investigation that led to this doc. Short version: there is no token, no flag, no policy that removes this infobar. We tried.
