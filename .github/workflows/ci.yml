@@ -9,34 +9,37 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    
+
     strategy:
       matrix:
         node-version: [18, 20, 22]
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-          cache-dependency-path: 'MCP Server/package-lock.json'
-      
+          cache: 'pnpm'
+          cache-dependency-path: 'MCP Server/pnpm-lock.yaml'
+
       - name: Install dependencies
         working-directory: MCP Server
-        run: npm ci
-      
+        run: pnpm install --frozen-lockfile
+
       - name: Type check
         working-directory: MCP Server
-        run: npm run typecheck
-      
+        run: pnpm run typecheck
+
       - name: Build
         working-directory: MCP Server
-        run: npm run build
-      
+        run: pnpm run build
+
       - name: Test
         working-directory: MCP Server
-        run: npm run test
+        run: pnpm run test
         continue-on-error: true  # Tests may need browser, skip in CI for now

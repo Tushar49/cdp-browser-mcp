@@ -4,10 +4,10 @@
 
 ```bash
 cd "MCP Server"
-npm install
-npm run build
-npm run typecheck
-npm run test
+pnpm install
+pnpm build
+pnpm typecheck
+pnpm test
 ```
 
 ## Development Workflow
@@ -44,9 +44,9 @@ Key principles:
 ## Running Tests
 
 ```bash
-npm run test              # Unit tests
-npm run test:integration  # Integration tests (needs browser)
-npm run benchmark         # Speed benchmarks (needs CDP + Playwright)
+pnpm test                 # Unit tests
+pnpm test:integration     # Integration tests (needs browser)
+pnpm benchmark            # Speed benchmarks (needs CDP + Playwright)
 ```
 
 ## Code Style

@@ -2,6 +2,20 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
+## [5.0.1] - 2026-10-19
+
+First stable v5 release on npm. Consolidates v5.0.0-alpha.1 → alpha.4.
+
+### Added
+- npm package: `npm install cdp-mcp-server` / `npx cdp-mcp-server` (README: install-from-npm section)
+- Tagged releases publish to npm automatically via `release.yml` (requires `NPM_TOKEN` secret; prerelease tags → `alpha` dist-tag, stable tags → `latest`)
+- Release bundle now ships `dist/` + `package.json` + lockfile — standalone-installable without cloning
+
+### Changed
+- Package manager: npm → **pnpm** (lockfile, CI, docs; esbuild build allowlisted via `pnpm.onlyBuiltDependencies`)
+- `package.json` files allowlist: `dist/**` only
+- Legacy v4 `server.js` removed from main (parked at `_archive/legacy-server-v4.js` on dev)
+
 ## [5.0.0-alpha.4] - 2026-10-19
 
 ### Added
