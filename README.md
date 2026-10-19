@@ -155,6 +155,29 @@ That's it. Two dependencies: `ws` (WebSocket client) and `@modelcontextprotocol/
 
 > **Note:** The server auto-connects to your running browser on first tool call — no manual `browser.connect()` needed.
 
+### Install from npm (no clone needed)
+
+Requires Node.js 18+ only:
+
+```bash
+npm install -g cdp-mcp-server@alpha
+```
+
+Or point your MCP client straight at npx:
+
+```json
+{
+  "mcpServers": {
+    "cdp-browser": {
+      "command": "npx",
+      "args": ["-y", "cdp-mcp-server@alpha"]
+    }
+  }
+}
+```
+
+`@alpha` tracks prerelease versions; stable releases install with plain `cdp-mcp-server`.
+
 ### Step 2b: Install commit hooks (optional, recommended)
 
 From the repo root (not `MCP Server/`):
