@@ -2,7 +2,7 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
-## [5.0.0-alpha.4] - 2026-05-13
+## [5.0.0-alpha.4] - 2026-10-19
 
 ### Added
 - `src/__tests__/agent-suite/`: scenario definitions for LinkedIn Easy Apply, Adobe Phenom, Hirist 403, Greenhouse w/ reCAPTCHA, Workday iframes, Google Forms phone country code. Runner stub awaiting activation (`runScenario`/`compareScenario` throw with pointer to BACKLOG E). Shape validation tests pass (20/20 in `unit/agent-suite-scenarios.test.ts`).
