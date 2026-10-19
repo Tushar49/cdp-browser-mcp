@@ -1,6 +1,6 @@
 # cdp-browser-mcp — AGENTS.md
 
-**Branches:** main (public) · dev (working) · **Version:** 5.0.0-alpha.3
+**Branches:** main (public) · dev (working) · **Version:** 5.0.0-alpha.4
 Contributor + agent guide for this repo — identical file on both branches.
 Short on purpose — details live in
 CONTRIBUTING.md (workflow), README.md (product), CHANGELOG.md (history).
@@ -25,7 +25,7 @@ Chrome CDP-based MCP server. Connects to the user's **real running browser**
 │   ├── src/tools/             # 14 tools / 90+ actions (registry.ts wires all)
 │   ├── src/utils/             # wait, retry, errors, response builder
 │   ├── src/__tests__/         # unit + integration + benchmarks
-│   └── server.js              # REMOVED on dev (parked: _archive/legacy-server-v4.js)
+│   └── server.js              # REMOVED in v5 alpha.4 (parked: _archive/legacy-server-v4.js, dev-only)
 │
 │   NOTE: `_archive/legacy-server-v4.js` stays on dev only — promote.yml
 │   strips `_archive/` at merge time, so main's tree/registry never sees it.
