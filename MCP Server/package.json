@@ -31,7 +31,6 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "start:legacy": "node server.js",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",

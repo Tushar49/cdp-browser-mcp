@@ -9,6 +9,12 @@
     .connected { background: #e8f5e9; color: #2e7d32; }
     .disconnected { background: #fce4ec; color: #c62828; }
     .info { font-size: 12px; color: #666; margin-top: 12px; }
+    .approvals { margin-top: 12px; font-size: 12px; }
+    .approvals h3 { margin: 0 0 6px; font-size: 13px; }
+    .approval-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid #eee; }
+    .approval-id { flex: 1; font-family: monospace; font-size: 11px; word-break: break-all; }
+    .approval-state { font-weight: bold; }
+    .muted { color: #888; font-style: italic; }
   </style>
 </head>
 <body>
@@ -19,6 +25,10 @@
   <div class="info">
     <p>This extension will let AI agents control your browser without needing chrome://flags or --remote-debugging-port.</p>
     <p><strong>Status:</strong> Scaffold only (v0.1.0)</p>
+  </div>
+  <div class="approvals">
+    <h3>Approved clients</h3>
+    <div id="approvals-list"></div>
   </div>
   <script src="popup.js"></script>
 </body>

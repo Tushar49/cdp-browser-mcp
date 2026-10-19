@@ -2,6 +2,33 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
+## [5.0.0-alpha.4] - 2026-05-13
+
+### Added
+- `src/__tests__/agent-suite/`: scenario definitions for LinkedIn Easy Apply, Adobe Phenom, Hirist 403, Greenhouse w/ reCAPTCHA, Workday iframes, Google Forms phone country code. Runner stub awaiting activation (`runScenario`/`compareScenario` throw with pointer to BACKLOG E). Shape validation tests pass (20/20 in `unit/agent-suite-scenarios.test.ts`).
+
+### Changed (slim mode)
+- Tool descriptions further trimmed in slim mode (-43%): each `browser_*` tool now has a one-line description, per-property schema descriptions stripped where the name is self-documenting. Total slim `ListTools` JSON: 2,226 → 1,416 chars (-36%).
+- Response messages shortened in slim mode: `Clicked <div> "Submit Application" at (320, 482)` → `Clicked` for click / hover / type / drag / scroll / focus / check / tap / press / select / upload. Saves ~30-60 chars per call (~350 chars per typical 10-action session).
+- Default `page.snapshot` `maxLength` = 4000 in slim mode (was 20,000). Caps every snapshot at a 32K-context-friendly size; full mode default unchanged.
+- Compact snapshot header in slim mode: `Page: ...\nURL: ...\nElements: N\n\n` → `[N elems] title\n\n` (-60 to -200 chars per snapshot).
+- Compact frame breadcrumb in slim mode: `[frame N] ` → `[fN] ` (-5 chars per iframe node line).
+- Shorter cap-truncation footer in slim mode (-40 chars when output is truncated).
+
+### Added
+- docs/CHROME_AUTOMATION_INFOBAR.md — explains the Chrome "is being controlled" infobar and why it cannot be hidden
+- extension/: chrome.storage.local approval persistence (popup.js, background.js, manifest.json permission) — ready for extension graduation from stub
+- Regression tests for slim mode output budgets(`src/__tests__/unit/slim-output-budget.test.ts`, 11 tests). Enforces: schema total < 1500 chars, synthetic complex-form snapshot < 6000 chars, slim click result < 80 chars.
+- `isSlimMode()`, `slimify(verbose, slim)`, `defaultSnapshotMaxLength()` helpers exported from `src/tools/slim-mode.ts`.
+
+### Added (Playwright parity)
+- **`interact.click waitFor`** — Optional `{ selector | text | textGone, state, timeout }` on click. Wait-for-element runs in the same call, eliminating the separate `page.wait` round-trip after navigations triggered by a click. Parity with Playwright MCP `browser_click` followed by `browser_wait_for`. Tests: `src/__tests__/unit/interact-click-wait-for.test.ts`.
+- **`storage` web storage R/W** — Three new actions on the `storage` tool: `get_storage`, `set_storage`, `delete_storage` with `storageType: "local" | "session"` (default `local`). Reads/writes individual `localStorage` / `sessionStorage` keys (or the whole area when `key` is omitted). Replaces the prior `execute.eval` workaround. Parity with Playwright MCP `browser_localstorage_*` and `browser_sessionstorage_*`. Tests: `src/__tests__/unit/storage-web-storage.test.ts`.
+- **`observe.request urlFilter`** — Allow `urlFilter` (URL substring) as an alternative to `requestId`. Resolves to the most recent matching captured request and fetches its body in a single call, skipping the prior `observe.network` listing. Parity with Playwright MCP `browser_network_requests` inline-body return. Tests: `src/__tests__/unit/observe-request-url-filter.test.ts`.
+
+### Fixed
+- Profile-sticky sessions: tabs no longer open in user-focused browser when pinned profile is set
+
 ## [5.0.0-alpha.3] - 2026-05-12
 
 ### Added
@@ -24,6 +51,10 @@ All notable changes to CDP Browser MCP Server will be documented in this file.
 - Version: 5.0.0-alpha.3
 
 ## [Unreleased]
+
+### Added
+- `.githooks/` - pre-commit warning when code changes without CHANGELOG update. Non-blocking. Install with `bash .githooks/install.sh` or `pwsh -File .githooks/install.ps1`. Skip with `git commit --no-verify`. See `.githooks/README.md`.
+- scripts/start-chrome.{ps1,sh} - consistent Chrome launcher for CDP debugging port. No-ops if already running. Supports --isolated for fresh automation profile.
 
 ## [5.0.0-alpha.2] - 2026-04-22
 

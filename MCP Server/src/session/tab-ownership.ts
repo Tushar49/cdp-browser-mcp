@@ -6,6 +6,14 @@
  *  - `activeSessions` Map  — tabId → CDP session ID mapping
  *  - Exclusive lock checks in handleTool
  *  - Tab listing filters (showAll vs session-scoped)
+ *
+ * Note (Issue B, alpha.4): profile-sticky launch logic does NOT live
+ * here — the pinned `browserContextId` is stored on the AgentSession
+ * itself (see session-manager.ts) and resolved at tab-creation time
+ * by `session/profile-resolver.ts`. A stale pin used to silently let
+ * Chrome open new tabs in the user's foreground profile; the resolver
+ * now validates the pin against `Target.getBrowserContexts` ∪
+ * `Target.getTargets[].browserContextId` before each `tabs.new`.
  */
 
 // ─── Public Types ───────────────────────────────────────────────────

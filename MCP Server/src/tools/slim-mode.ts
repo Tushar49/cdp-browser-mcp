@@ -17,42 +17,45 @@ export interface SlimToolDef {
 
 /**
  * Returns the 6 essential tools with minimal schemas.
- * Total schema size: ~1.5KB vs ~8KB+ for full tool set.
+ *
+ * v5.0.0-alpha.4: descriptions tightened to one-liners and per-property
+ * descriptions stripped where the property name is self-documenting. Total
+ * `ListTools` JSON dropped from ~2.2 KB → ~1.2 KB.
  */
 export function getSlimTools(): SlimToolDef[] {
   return [
     {
       name: 'browser_navigate',
-      description: 'Navigate to URL. Auto-connects to browser.',
+      description: 'Navigate to URL.',
       inputSchema: {
         type: 'object',
         properties: {
-          url: { type: 'string', description: 'URL to navigate to' },
-          tabId: { type: 'string', description: 'Tab ID (optional — uses active tab if omitted)' },
+          url: { type: 'string' },
+          tabId: { type: 'string' },
         },
         required: ['url'],
       },
     },
     {
       name: 'browser_snapshot',
-      description: 'Get page accessibility snapshot with element refs. Use refs to interact with elements.',
+      description: 'Page snapshot with element refs.',
       inputSchema: {
         type: 'object',
         properties: {
           tabId: { type: 'string' },
-          maxLength: { type: 'number', description: 'Max chars to return (default: 8000)' },
-          interactive: { type: 'boolean', description: 'Only show interactive elements (buttons, inputs, links)' },
-          search: { type: 'string', description: 'Filter snapshot to elements matching this text' },
+          maxLength: { type: 'number' },
+          interactive: { type: 'boolean' },
+          search: { type: 'string' },
         },
       },
     },
     {
       name: 'browser_click',
-      description: 'Click an element by ref from snapshot.',
+      description: 'Click element by ref.',
       inputSchema: {
         type: 'object',
         properties: {
-          ref: { type: 'number', description: 'Element ref from snapshot' },
+          ref: { type: 'number' },
           tabId: { type: 'string' },
         },
         required: ['ref'],
@@ -60,21 +63,21 @@ export function getSlimTools(): SlimToolDef[] {
     },
     {
       name: 'browser_type',
-      description: 'Type text into focused element or element by ref.',
+      description: 'Type text into ref or focused element.',
       inputSchema: {
         type: 'object',
         properties: {
-          ref: { type: 'number', description: 'Element ref (optional — types into focused element)' },
-          text: { type: 'string', description: 'Text to type' },
+          ref: { type: 'number' },
+          text: { type: 'string' },
           tabId: { type: 'string' },
-          submit: { type: 'boolean', description: 'Press Enter after typing' },
+          submit: { type: 'boolean' },
         },
         required: ['text'],
       },
     },
     {
       name: 'browser_fill_form',
-      description: 'Fill multiple form fields at once. Handles text, dropdowns, checkboxes, all types.',
+      description: 'Fill multiple fields by ref. Handles text, dropdowns, checkboxes.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -83,8 +86,8 @@ export function getSlimTools(): SlimToolDef[] {
             items: {
               type: 'object',
               properties: {
-                ref: { type: 'number', description: 'Element ref from snapshot' },
-                value: { type: 'string', description: 'Value to fill' },
+                ref: { type: 'number' },
+                value: { type: 'string' },
               },
               required: ['ref', 'value'],
             },
@@ -96,21 +99,52 @@ export function getSlimTools(): SlimToolDef[] {
     },
     {
       name: 'browser_tabs',
-      description: 'List open tabs, create new tab, or close a tab.',
+      description: 'List, open or close tabs.',
       inputSchema: {
         type: 'object',
         properties: {
-          action: {
-            type: 'string',
-            enum: ['list', 'new', 'close'],
-            description: 'list: show tabs, new: open tab, close: close tab',
-          },
-          url: { type: 'string', description: 'URL for new tab' },
-          tabId: { type: 'string', description: 'Tab to close' },
+          action: { type: 'string', enum: ['list', 'new', 'close'] },
+          url: { type: 'string' },
+          tabId: { type: 'string' },
         },
       },
     },
   ];
+}
+
+// ─── Slim-mode helpers (v5.0.0-alpha.4) ─────────────────────────────
+
+/**
+ * Returns true when the server is running with `CDP_SLIM_MODE=true`.
+ *
+ * Read from the environment on every call rather than cached so tests can
+ * toggle it without re-importing the module. The flag is intentionally
+ * kept env-driven (matching `loadConfig()`) so handlers in `page.ts` and
+ * `interact.ts` do not need to thread the full `ServerConfig` through.
+ */
+export function isSlimMode(): boolean {
+  return process.env.CDP_SLIM_MODE === 'true';
+}
+
+/**
+ * Pick a string based on slim mode.
+ *
+ * @example
+ *   ok(slimify('Clicked <div> "Submit" at (320, 482)', 'Clicked'));
+ */
+export function slimify(verbose: string, slim: string): string {
+  return isSlimMode() ? slim : verbose;
+}
+
+/** Default `page.snapshot` `maxLength` cap when caller does not specify one. */
+export const SLIM_DEFAULT_SNAPSHOT_MAX_LENGTH = 4000;
+export const FULL_DEFAULT_SNAPSHOT_MAX_LENGTH = 20_000;
+
+/** Resolve the effective default snapshot cap based on the current mode. */
+export function defaultSnapshotMaxLength(): number {
+  return isSlimMode()
+    ? SLIM_DEFAULT_SNAPSHOT_MAX_LENGTH
+    : FULL_DEFAULT_SNAPSHOT_MAX_LENGTH;
 }
 
 /**

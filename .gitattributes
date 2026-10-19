@@ -1,0 +1,3 @@
+# git hook scripts must use LF on all platforms
+.githooks/pre-commit text eol=lf
+.githooks/install.sh text eol=lf

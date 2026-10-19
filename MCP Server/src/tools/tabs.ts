@@ -10,6 +10,7 @@ import type { AgentSession } from '../session/session-manager.js';
 import { defineTool } from './base-tool.js';
 import { ok, fail } from '../utils/helpers.js';
 import { Errors } from '../utils/error-handler.js';
+import { resolvePinnedContextId } from '../session/profile-resolver.js';
 
 // ─── Action Handlers ────────────────────────────────────────────────
 
@@ -125,7 +126,11 @@ async function handleFind(
   return ok(`${hits.length} match(es):\n\n${lines.join('\n\n')}`);
 }
 
-async function handleNew(
+/**
+ * Create a new tab. Exported for direct unit testing of the
+ * profile-launch path (see __tests__/unit/profile-launch.test.ts).
+ */
+export async function handleNew(
   ctx: ServerContext,
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
@@ -136,10 +141,30 @@ async function handleNew(
   // Phase 1: Create the tab with about:blank (no URL yet)
   const createParams: Record<string, unknown> = { url: 'about:blank', background };
 
-  // Profile-sticky sessions: if no explicit profile, use session's pinned profile
+  // Profile-sticky sessions: if no explicit profile, validate and use the
+  // session's pinned profile.
+  //
+  // Issue B fix (alpha.4): we MUST verify the pinned browserContextId
+  // is still alive in Chrome before passing it to Target.createTarget.
+  // If we pass a stale id, Chrome silently falls back to the *currently
+  // focused* browser context — i.e. whichever profile window the human
+  // user happens to be looking at — which silently breaks profile
+  // stickiness. See session/profile-resolver.ts for the long form.
   const session = args._agentSession as AgentSession | undefined;
   if (!args.profile && session?.browserContextId) {
-    createParams.browserContextId = session.browserContextId;
+    const validatedCtx = await resolvePinnedContextId(
+      (method, params) => ctx.sendCommand(method, params),
+      session,
+    );
+    if (validatedCtx) {
+      createParams.browserContextId = validatedCtx;
+    } else {
+      // Pin has gone stale (every tab in that profile was closed, or
+      // Chrome rotated the context id). Clear it so the post-create
+      // logic below re-pins to the profile the new tab lands in,
+      // rather than us continuing to claim a dead pin.
+      session.browserContextId = undefined;
+    }
   }
 
   // Issue #11: Profile-aware tab creation — resolve profile name to browserContextId

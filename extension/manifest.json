@@ -3,7 +3,7 @@
   "name": "CDP Browser MCP Bridge",
   "version": "0.1.0",
   "description": "Connects CDP Browser MCP Server to your browser without --remote-debugging-port",
-  "permissions": ["debugger", "tabs", "activeTab"],
+  "permissions": ["debugger", "tabs", "activeTab", "storage"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js",

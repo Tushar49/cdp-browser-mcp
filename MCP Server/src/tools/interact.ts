@@ -11,7 +11,14 @@ import type { ToolRegistry } from './registry.js';
 import { defineTool } from './base-tool.js';
 import { ok, fail, randomDelay, generateBezierPath } from '../utils/helpers.js';
 import { Errors, wrapError } from '../utils/error-handler.js';
-import { sleep } from '../utils/wait.js';
+import { slimify } from './slim-mode.js';
+import {
+  sleep,
+  waitForSelector,
+  waitForText,
+  waitForTextGone,
+  type SelectorState,
+} from '../utils/wait.js';
 
 // ─── Network Settle Helper ──────────────────────────────────────────
 
@@ -56,6 +63,56 @@ async function waitForNetworkSettle(
   }
 
   return events;
+}
+
+// ─── Click waitFor Helper ───────────────────────────────────────────
+
+/**
+ * Run a post-click wait condition. Mirrors `page.wait` semantics so an agent
+ * can click+wait in a single call.
+ *
+ * Parity with Playwright MCP browser_click — single-call equivalent of
+ * `browser_click` followed by `browser_wait_for { text | textGone | time }`.
+ *
+ * Returns a short human-readable suffix to append to the click result.
+ */
+async function runClickWaitFor(
+  ctx: ServerContext,
+  sess: string,
+  waitFor: NonNullable<InteractArgs['waitFor']>,
+  defaultTimeout: number,
+): Promise<string> {
+  const timeout = waitFor.timeout ?? defaultTimeout;
+  const cdpSend = (
+    method: string,
+    params?: Record<string, unknown>,
+    sessionId?: string,
+  ): Promise<Record<string, unknown>> =>
+    ctx.sendCommand(method, params, sessionId) as Promise<Record<string, unknown>>;
+
+  if (waitFor.textGone) {
+    const found = await waitForTextGone(cdpSend, sess, waitFor.textGone, timeout);
+    return found
+      ? `\nWait: "${waitFor.textGone}" disappeared`
+      : `\nWait: timed out (${timeout}ms) waiting for "${waitFor.textGone}" to disappear`;
+  }
+
+  if (waitFor.text) {
+    const found = await waitForText(cdpSend, sess, waitFor.text, timeout);
+    return found
+      ? `\nWait: "${waitFor.text}" appeared`
+      : `\nWait: timed out (${timeout}ms) waiting for "${waitFor.text}"`;
+  }
+
+  if (waitFor.selector) {
+    const state: SelectorState = waitFor.state ?? 'visible';
+    const found = await waitForSelector(cdpSend, sess, waitFor.selector, state, timeout);
+    return found
+      ? `\nWait: ${waitFor.selector} ${state}`
+      : `\nWait: timed out (${timeout}ms) waiting for ${waitFor.selector} [state: ${state}]`;
+  }
+
+  return '';
 }
 
 // ─── Arg Interfaces ─────────────────────────────────────────────────
@@ -103,6 +160,14 @@ interface InteractArgs {
   files?: string[];
   // check
   checked?: boolean;
+  // click waitFor (Playwright parity — see handleClick)
+  waitFor?: {
+    selector?: string;
+    text?: string;
+    textGone?: string;
+    state?: SelectorState;
+    timeout?: number;
+  };
   // common
   timeout?: number;
   humanMode?: boolean;
@@ -168,7 +233,10 @@ async function handleClick(ctx: ServerContext, args: InteractArgs): Promise<Tool
   // Force JS click — skip CDP mouse events entirely
   if (args.jsClick) {
     await jsClickElement(ctx, resolvedSession, node.backendNodeId);
-    return ok(`Clicked (JS) <${el.tag}> "${el.label}" at (${Math.round(el.x)}, ${Math.round(el.y)})`);
+    const waitSuffixJs = args.waitFor
+      ? await runClickWaitFor(ctx, sess, args.waitFor, retryTimeout)
+      : '';
+    return ok(slimify(`Clicked (JS) <${el.tag}> "${el.label}" at (${Math.round(el.x)}, ${Math.round(el.y)})${waitSuffixJs}`, 'Clicked'));
   }
 
   const button = args.button || 'left';
@@ -209,13 +277,19 @@ async function handleClick(ctx: ServerContext, args: InteractArgs): Promise<Tool
     // Wait briefly for any triggered network requests to settle
     const netEvents = await waitForNetworkSettle(ctx, sess, 2000);
     const netSuffix = netEvents.length > 0 ? `\nNetwork: ${netEvents.length} request(s) completed` : '';
-    return ok(`Clicked <${el.tag}> "${el.label}" at (${Math.round(el.x)}, ${Math.round(el.y)})${netSuffix}`);
+    const waitSuffix = args.waitFor
+      ? await runClickWaitFor(ctx, sess, args.waitFor, retryTimeout)
+      : '';
+    return ok(slimify(`Clicked <${el.tag}> "${el.label}" at (${Math.round(el.x)}, ${Math.round(el.y)})${netSuffix}${waitSuffix}`, 'Clicked'));
   } catch {
     // CDP click failed (element not interactable) — fallback to JS click
     await jsClickElement(ctx, resolvedSession, node.backendNodeId);
     const netEvents2 = await waitForNetworkSettle(ctx, sess, 2000);
     const netSuffix2 = netEvents2.length > 0 ? `\nNetwork: ${netEvents2.length} request(s) completed` : '';
-    return ok(`Clicked (JS fallback) <${el.tag}> "${el.label}" at (${Math.round(el.x)}, ${Math.round(el.y)})${netSuffix2}`);
+    const waitSuffix2 = args.waitFor
+      ? await runClickWaitFor(ctx, sess, args.waitFor, retryTimeout)
+      : '';
+    return ok(slimify(`Clicked (JS fallback) <${el.tag}> "${el.label}" at (${Math.round(el.x)}, ${Math.round(el.y)})${netSuffix2}${waitSuffix2}`, 'Clicked'));
   }
 }
 
@@ -242,7 +316,7 @@ async function handleHover(ctx: ServerContext, args: InteractArgs): Promise<Tool
     }, sess);
   }
 
-  return ok(`Hovering over <${el.tag}> "${el.label}" at (${Math.round(el.x)}, ${Math.round(el.y)})${args.humanMode ? ' (human path)' : ''}`);
+  return ok(slimify(`Hovering over <${el.tag}> "${el.label}" at (${Math.round(el.x)}, ${Math.round(el.y)})${args.humanMode ? ' (human path)' : ''}`, 'Hovered'));
 }
 
 async function handleType(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
@@ -355,7 +429,7 @@ async function handleType(ctx: ServerContext, args: InteractArgs): Promise<ToolR
   }
 
   const display = args.text.length > 60 ? args.text.substring(0, 60) + '...' : args.text;
-  return ok(`Typed "${display}"${args.submit ? ' + Enter' : ''}`);
+  return ok(slimify(`Typed "${display}"${args.submit ? ' + Enter' : ''}`, `Typed${args.submit ? '+Enter' : ''}`));
 }
 
 async function handleFill(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
@@ -493,7 +567,7 @@ async function handleSelect(ctx: ServerContext, args: InteractArgs): Promise<Too
     if (cv?.error) return fail(String(cv.error));
   }
 
-  return ok('Selected option successfully');
+  return ok(slimify('Selected option successfully', 'Selected'));
 }
 
 async function handlePress(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
@@ -514,7 +588,7 @@ async function handlePress(ctx: ServerContext, args: InteractArgs): Promise<Tool
   }, sess);
 
   const modStr = args.modifiers?.length ? args.modifiers.join('+') + '+' : '';
-  return ok(`Pressed ${modStr}${args.key}`);
+  return ok(slimify(`Pressed ${modStr}${args.key}`, 'Pressed'));
 }
 
 async function handleDrag(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
@@ -563,7 +637,7 @@ async function handleDrag(ctx: ServerContext, args: InteractArgs): Promise<ToolR
     type: 'mouseReleased', x: tgt.x, y: tgt.y, button: 'left', clickCount: 1,
   }, sess);
 
-  return ok(`Dragged <${src.tag}> "${src.label}" → <${tgt.tag}> "${tgt.label}"${args.humanMode ? ' (human path)' : ''}`);
+  return ok(slimify(`Dragged <${src.tag}> "${src.label}" → <${tgt.tag}> "${tgt.label}"${args.humanMode ? ' (human path)' : ''}`, 'Dragged'));
 }
 
 async function handleScroll(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
@@ -591,7 +665,7 @@ async function handleScroll(ctx: ServerContext, args: InteractArgs): Promise<Too
         returnByValue: true,
       }, sess);
     }
-    return ok(`Scrolled to (${scrollX}, ${scrollY})`);
+    return ok(slimify(`Scrolled to (${scrollX}, ${scrollY})`, 'Scrolled'));
   }
 
   // scrollBy with direction
@@ -621,7 +695,7 @@ async function handleScroll(ctx: ServerContext, args: InteractArgs): Promise<Too
     }, sess);
   }
 
-  return ok(`Scrolled ${dir} by ${amount}px`);
+  return ok(slimify(`Scrolled ${dir} by ${amount}px`, 'Scrolled'));
 }
 
 async function handleUpload(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
@@ -740,16 +814,16 @@ async function handleUpload(ctx: ServerContext, args: InteractArgs): Promise<Too
           action: 'accept', files: args.files,
         }, result.sessionId);
         const where = managedSessions.get(result.sessionId)?.isPopup ? ' (from popup window)' : '';
-        return ok(`Uploaded ${args.files.length} file(s) via file chooser${where}: ${args.files.map(f => f.split(/[/\\]/).pop()).join(', ')}`);
+        return ok(slimify(`Uploaded ${args.files.length} file(s) via file chooser${where}: ${args.files.map(f => f.split(/[/\\]/).pop()).join(', ')}`, `Uploaded ${args.files.length}`));
       }
 
       if (result.via === 'popupDirectInput') {
         await sleep(1000); // let the popup process the files
-        return ok(`Uploaded ${args.files.length} file(s) via popup file input: ${args.files.map(f => f.split(/[/\\]/).pop()).join(', ')}`);
+        return ok(slimify(`Uploaded ${args.files.length} file(s) via popup file input: ${args.files.map(f => f.split(/[/\\]/).pop()).join(', ')}`, `Uploaded ${args.files.length}`));
       }
 
       // directInput on main page
-      return ok(`Uploaded ${args.files.length} file(s) via file input: ${args.files.map(f => f.split(/[/\\]/).pop()).join(', ')}`);
+      return ok(slimify(`Uploaded ${args.files.length} file(s) via file input: ${args.files.map(f => f.split(/[/\\]/).pop()).join(', ')}`, `Uploaded ${args.files.length}`));
     } catch (err) {
       return fail((err as Error).message);
     } finally {
@@ -789,7 +863,7 @@ async function handleUpload(ctx: ServerContext, args: InteractArgs): Promise<Too
     files: args.files, backendNodeId: node.backendNodeId,
   }, resolvedSession);
 
-  return ok(`Uploaded ${args.files.length} file(s): ${args.files.map(f => f.split(/[/\\]/).pop()).join(', ')}`);
+  return ok(slimify(`Uploaded ${args.files.length} file(s): ${args.files.map(f => f.split(/[/\\]/).pop()).join(', ')}`, `Uploaded ${args.files.length}`));
 }
 
 async function handleFocus(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
@@ -812,7 +886,7 @@ async function handleFocus(ctx: ServerContext, args: InteractArgs): Promise<Tool
 
   const v = result.result.value;
   if (v?.error) return fail(v.error);
-  return ok(`Focused <${v.tag}> "${v.label}"`);
+  return ok(slimify(`Focused <${v.tag}> "${v.label}"`, 'Focused'));
 }
 
 async function handleCheck(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
@@ -839,7 +913,7 @@ async function handleCheck(ctx: ServerContext, args: InteractArgs): Promise<Tool
     returnByValue: true,
   }, resolvedSession);
 
-  return ok(`Checkbox: ${args.checked ? 'checked' : 'unchecked'}`);
+  return ok(slimify(`Checkbox: ${args.checked ? 'checked' : 'unchecked'}`, args.checked ? 'Checked' : 'Unchecked'));
 }
 
 async function handleTap(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
@@ -867,7 +941,7 @@ async function handleTap(ctx: ServerContext, args: InteractArgs): Promise<ToolRe
     touchPoints: [],
   }, sess);
 
-  return ok(`Tapped <${el.tag}> "${el.label}" at (${Math.round(el.x)}, ${Math.round(el.y)})`);
+  return ok(slimify(`Tapped <${el.tag}> "${el.label}" at (${Math.round(el.x)}, ${Math.round(el.y)})`, 'Tapped'));
 }
 
 // ─── Internal Helpers ───────────────────────────────────────────────
@@ -1184,7 +1258,7 @@ const INTERACT_DESCRIPTION = [
   'Always take a snapshot first to get uid refs.',
   '',
   'Actions:',
-  '- click: Click element (tabId, uid/selector; optional: button, clickCount, jsClick, modifiers, humanMode)',
+  '- click: Click element (tabId, uid/selector; optional: button, clickCount, jsClick, modifiers, humanMode, waitFor — wait-for-element after click in same call)',
   '- hover: Hover element (tabId, uid/selector)',
   '- type: Type text (tabId, text, uid/selector; optional: clear, submit, delay, charDelay, wordDelay, typoRate)',
   '- fill: Fill multiple fields [{uid, value, type}] (tabId, fields)',
@@ -1275,6 +1349,21 @@ const INTERACT_INPUT_SCHEMA = {
       description: 'File paths for upload.',
     },
     checked: { type: 'boolean' as const, description: 'Desired checked state for check action.' },
+    waitFor: {
+      type: 'object' as const,
+      description: 'Optional post-click wait. Skip a separate page.wait call. Provide one of: selector, text, textGone. Parity with Playwright MCP browser_click.',
+      properties: {
+        selector: { type: 'string' as const, description: 'CSS selector to wait for after click.' },
+        text: { type: 'string' as const, description: 'Text to wait to appear in the page after click.' },
+        textGone: { type: 'string' as const, description: 'Text to wait to disappear from the page after click.' },
+        state: {
+          type: 'string' as const,
+          enum: ['visible', 'hidden', 'attached', 'detached'] as const,
+          description: 'Selector wait state (default: visible). Matches Playwright locator.waitFor states.',
+        },
+        timeout: { type: 'number' as const, description: 'Wait timeout in ms (default: action timeout).' },
+      },
+    },
     timeout: {
       type: 'number' as const,
       description: 'Retry timeout in ms for element resolution and actionability (default: CDP_ACTION_TIMEOUT). Element is polled until found+actionable or timeout.',

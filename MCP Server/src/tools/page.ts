@@ -17,6 +17,7 @@ import { sleep, waitForReadyState, waitForText, waitForTextGone, waitForSelector
 import type { WaitUntil, SelectorState } from '../utils/wait.js';
 import { TempFileManager } from '../utils/temp-files.js';
 import type { AXNode } from '../snapshot/accessibility.js';
+import { isSlimMode, defaultSnapshotMaxLength } from './slim-mode.js';
 
 // ─── Path Security ──────────────────────────────────────────────────
 
@@ -305,13 +306,16 @@ async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolR
     resolver.assignRefs(optimizedMain);
     const mainSnapshot = serializeTree(optimizedMain);
 
+    const slim = isSlimMode();
     const frameParts: string[] = [];
     const frameOptimized: AXNode[] = [];
     let frameIndex = 1;
     for (const [, { nodes }] of fullTree.frameNodes) {
       const optimizedFrame = TokenOptimizer.optimize(nodes);
       resolver.assignRefs(optimizedFrame);
-      frameParts.push(serializeTree(optimizedFrame, 0, `[frame ${frameIndex}] `));
+      // Slim mode shortens "[frame N] " (10 chars) → "[fN] " (5 chars).
+      const framePrefix = slim ? `[f${frameIndex}] ` : `[frame ${frameIndex}] `;
+      frameParts.push(serializeTree(optimizedFrame, 0, framePrefix));
       frameOptimized.push(...optimizedFrame);
       frameIndex++;
     }
@@ -376,12 +380,18 @@ async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolR
     nodeCount = countNodes(searchNodes);
   }
 
-  const header = `Page: ${title}\nURL: ${currentUrl}\nElements: ${nodeCount}\n\n`;
+  const slim = isSlimMode();
+  // Slim header trims "Page: ...\nURL: ...\nElements: N\n\n" (80–250 chars)
+  // down to "[N elems] title\n\n" (~30 chars).
+  const header = slim
+    ? `[${nodeCount} elems] ${title}\n\n`
+    : `Page: ${title}\nURL: ${currentUrl}\nElements: ${nodeCount}\n\n`;
   const fullOutput = header + snapshot;
 
-  // Post-processing: cap output length
-  const maxLen = args.maxLength ?? 20_000;
-  return ok(TokenOptimizer.capLength(fullOutput, maxLen));
+  // Post-processing: cap output length. Slim mode defaults to a 4 000-char
+  // cap (vs 20 000 in full mode) and uses a shorter truncation footer.
+  const maxLen = args.maxLength ?? defaultSnapshotMaxLength();
+  return ok(TokenOptimizer.capLength(fullOutput, maxLen, slim));
 }
 
 async function handleScreenshot(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {

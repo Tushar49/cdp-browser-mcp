@@ -265,15 +265,19 @@ export class TokenOptimizer {
   /**
    * Cap serialized output to a maximum character length with smart truncation.
    * Truncates at a line boundary to avoid breaking element references.
+   *
+   * @param slim When true, emit a much shorter truncation footer (-40 chars).
+   *             Used by slim-mode callers where every byte matters.
    */
-  static capLength(serialized: string, maxChars: number): string {
+  static capLength(serialized: string, maxChars: number, slim = false): string {
     if (serialized.length <= maxChars) return serialized;
     const truncPoint = serialized.lastIndexOf('\n', maxChars - 200);
     const cutAt = truncPoint > 0 ? truncPoint : maxChars - 200;
-    return (
-      serialized.substring(0, cutAt) +
-      `\n\n... (truncated ${serialized.length - cutAt} chars. Use search parameter to find specific elements)`
-    );
+    const dropped = serialized.length - cutAt;
+    const footer = slim
+      ? `\n... (+${dropped} chars truncated; use search)`
+      : `\n\n... (truncated ${dropped} chars. Use search parameter to find specific elements)`;
+    return serialized.substring(0, cutAt) + footer;
   }
 
   /**

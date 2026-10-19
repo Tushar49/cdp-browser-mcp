@@ -88,12 +88,43 @@ async function handleRequest(
   ctx: ServerContext,
   params: Record<string, unknown>,
 ): Promise<ToolResult> {
-  if (!params.requestId) return fail("Provide 'requestId' (from network listing).");
   const sess = params._sessionId as string;
   await ctx.sendCommand('Network.enable', {}, sess);
 
-  const requestId = params.requestId as string;
+  // Parity with Playwright MCP browser_network_requests — single-call equivalent.
+  // Allow `urlFilter` (substring) as an alternative to `requestId`. We resolve the
+  // most-recent matching request from ctx.networkReqs so the agent doesn't have to
+  // call observe.network first just to find the requestId.
+  let requestId = params.requestId as string | undefined;
+  let resolvedFrom: string | null = null;
+
+  if (!requestId) {
+    const urlFilter = params.urlFilter as string | undefined;
+    if (!urlFilter) {
+      return fail("Provide 'requestId' (from network listing) or 'urlFilter' (URL substring of the request to look up).");
+    }
+    const reqMap = ctx.networkReqs.get(sess);
+    if (!reqMap || reqMap.size === 0) {
+      return fail(`No network requests captured yet for this tab. Navigate or interact first, then retry with urlFilter="${urlFilter}".`);
+    }
+    const needle = urlFilter.toLowerCase();
+    let bestId: string | undefined;
+    let bestTs = -Infinity;
+    for (const [id, req] of reqMap) {
+      if ((req.url || '').toLowerCase().includes(needle) && req.ts > bestTs) {
+        bestTs = req.ts;
+        bestId = id;
+      }
+    }
+    if (!bestId) {
+      return fail(`No captured request URL matches "${urlFilter}". Use observe.network to list candidates.`);
+    }
+    requestId = bestId;
+    resolvedFrom = urlFilter;
+  }
+
   const result: Record<string, unknown> = { requestId };
+  if (resolvedFrom !== null) result.matchedFrom = resolvedFrom;
 
   // Get response body
   try {
@@ -243,7 +274,7 @@ export function registerObserveTools(
         'Operations:',
         '- console: Retrieve captured console messages (requires: tabId; optional: level[all|error|warning|log|info|debug], last — return only last N entries, clear — clear after returning)',
         '- network: List captured network requests with URLs, methods, status codes, and timing (requires: tabId; optional: filter — URL substring, types — resource type filter array, last, clear)',
-        '- request: Get the full request and response body for a specific network request (requires: tabId, requestId — from network listing)',
+        '- request: Get the full request and response body for a specific network request (requires: tabId; provide either requestId — from network listing — or urlFilter — substring of the URL; urlFilter resolves to the most recent matching request)',
         '- performance: Collect page performance metrics including DOM size, JS heap, layout counts, and paint timing (requires: tabId)',
         '- downloads: List tracked file downloads with progress info (requires: tabId; optional: last, clear)',
         '- har: Export captured network requests as HAR 1.2 JSON (requires: tabId)',
@@ -266,6 +297,7 @@ export function registerObserveTools(
           clear: { type: 'boolean', description: 'Clear captured data after returning.' },
           last: { type: 'number', description: 'Return only last N items.' },
           requestId: { type: 'string', description: 'Request ID for full body retrieval.' },
+          urlFilter: { type: 'string', description: 'URL substring to look up the most recent matching request body without first calling network. Parity with Playwright MCP browser_network_requests inline-body return.' },
           sessionId: { type: 'string', description: 'Agent session ID for tab ownership and isolation. Tabs are locked to sessions. Default: per-process UUID.' },
           cleanupStrategy: { type: 'string', enum: ['close', 'detach', 'none'], description: "Tab cleanup on session expiry. 'detach' (default) keeps tabs open, 'close' removes them, 'none' skips cleanup. Sticky per session." },
           exclusive: { type: 'boolean', description: 'Lock tab to this session (default: true). Set false to allow shared access.' },
