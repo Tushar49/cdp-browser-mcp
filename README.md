@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.0.0--alpha.4-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-5.0.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/tools-14-green" alt="Tools">
   <img src="https://img.shields.io/badge/sub--actions-90+-green" alt="Actions">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
@@ -147,9 +147,11 @@ google-chrome --remote-debugging-port=9222
 ```bash
 git clone https://github.com/Tushar49/cdp-browser-mcp.git
 cd cdp-browser-mcp/MCP\ Server
-npm install
-npm run build
+pnpm install
+pnpm build
 ```
+
+Package manager is pnpm (`npm i -g pnpm` once, or `corepack enable`). npm works for scripts too, but pnpm is canonical.
 
 That's it. Two dependencies: `ws` (WebSocket client) and `@modelcontextprotocol/sdk`.
 

@@ -1,6 +1,6 @@
 # cdp-browser-mcp — AGENTS.md
 
-**Branches:** main (public) · dev (working) · **Version:** 5.0.0-alpha.4
+**Branches:** main (public) · dev (working) · **Version:** 5.0.1
 Contributor + agent guide for this repo — identical file on both branches.
 Short on purpose — details live in
 CONTRIBUTING.md (workflow), README.md (product), CHANGELOG.md (history).
@@ -52,13 +52,15 @@ the **dev branch only** — it is deleted at every promote and never on main.
 
 ```bash
 cd "MCP Server"
-npm run build            # tsc → dist/
-npm run typecheck         # tsc --noEmit (run before every commit — zero errors)
-npm run lint              # alias of typecheck
-npm run test              # unit (vitest)
-npm run test:integration  # needs a real browser — local/dev only, not CI
-npm run benchmark         # needs CDP + Playwright — local/dev only
+pnpm build             # tsc → dist/
+pnpm typecheck          # tsc --noEmit (run before every commit — zero errors)
+pnpm lint               # alias of typecheck
+pnpm test               # unit (vitest)
+pnpm test:integration   # needs a real browser — local/dev only, not CI
+pnpm benchmark          # needs CDP + Playwright — local/dev only
 ```
+
+Package manager: **pnpm** (canonical). npm works for script invocation, but lockfile and CI are pnpm.
 
 ## Development rules
 
