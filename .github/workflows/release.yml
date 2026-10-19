@@ -1,12 +1,17 @@
 name: Release
 
-# Tagged releases only, from main only. Creates a GitHub Release with
-# the built dist/ attached. Dev branch can never cut a release.
+# Tagged releases only, from main only. Builds dist/, publishes a GitHub
+# Release with the bundle, and publishes to npm when the NPM_TOKEN secret
+# is set (skipped otherwise). Dev branch can never cut a release.
+#
+# npm dist-tag: prerelease tags (vX.Y.Z-foo) publish under "alpha",
+# stable tags publish under "latest".
 #
 # Usage:
 #   1. Promote dev → main (promote.yml, gives main the release version).
 #   2. Tag main:  git tag vX.Y.Z && git push origin vX.Y.Z
-#   3. This workflow builds, attaches dist/, and publishes the Release.
+#   3. This workflow builds, attaches the bundle, publishes the GitHub
+#      Release and (when NPM_TOKEN is configured) npm.
 
 on:
   push:
@@ -39,6 +44,7 @@ jobs:
           node-version: 20
           cache: 'npm'
           cache-dependency-path: 'MCP Server/package-lock.json'
+          registry-url: 'https://registry.npmjs.org'
 
       - run: npm ci
         working-directory: MCP Server
@@ -49,10 +55,38 @@ jobs:
       - run: npm run build
         working-directory: MCP Server
 
-      - name: Package dist
+      - name: Determine npm dist-tag
+        id: disttag
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            echo "tag=alpha" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check for npm credentials
+        id: npmcheck
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::NPM_TOKEN secret not set — skipping npm publish, GitHub Release only"
+          fi
+
+      - name: Publish to npm
+        if: steps.npmcheck.outputs.publish == 'true'
+        working-directory: MCP Server
+        run: npm publish --tag ${{ steps.disttag.outputs.tag }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Package release bundle
         run: |
           cd "MCP Server"
-          tar -czf ../cdp-browser-mcp-dist-${{ github.ref_name }}.tar.gz dist/
+          tar -czf ../cdp-browser-mcp-dist-${{ github.ref_name }}.tar.gz dist/ package.json package-lock.json
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
