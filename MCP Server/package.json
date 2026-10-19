@@ -11,6 +11,9 @@
     "type": "git",
     "url": "https://github.com/Tushar49/cdp-browser-mcp.git"
   },
+  "files": [
+    "dist/**"
+  ],
   "keywords": [
     "mcp",
     "automation",
