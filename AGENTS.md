@@ -1,6 +1,6 @@
 # cdp-browser-mcp — AGENTS.md
 
-**Branches:** main (public) · dev (working) · **Version:** 5.0.1
+**Branches:** main (public) · dev (working) · **Version:** 5.0.2
 Contributor + agent guide for this repo — identical file on both branches.
 Short on purpose — details live in
 CONTRIBUTING.md (workflow), README.md (product), CHANGELOG.md (history).

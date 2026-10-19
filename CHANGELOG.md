@@ -2,6 +2,14 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
+## [5.0.2] - 2026-10-19
+
+### Fixed
+- npm package now declares a `bin` entry — `npx cdp-mcp-server` works as an MCP stdio command (was: "could not determine executable to run")
+
+### Added
+- Shebang in the published entrypoint for direct Unix execution
+
 ## [5.0.1] - 2026-10-19
 
 First stable v5 release on npm. Consolidates v5.0.0-alpha.1 → alpha.4.

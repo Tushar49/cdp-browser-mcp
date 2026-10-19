@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * Entry point for the CDP Browser MCP Server v5.
  *
@@ -59,7 +60,7 @@ import { getSlimTools, mapSlimToFull } from './tools/slim-mode.js';
 
 // ─── Bootstrap ──────────────────────────────────────────────────────
 
-const VERSION = '5.0.1';
+const VERSION = '5.0.2';
 
 const config = loadConfig();
 
