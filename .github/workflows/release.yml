@@ -90,7 +90,7 @@ jobs:
       - name: Package release bundle
         run: |
           cd "MCP Server"
-          tar -czf ../cdp-browser-mcp-dist-${{ github.ref_name }}.tar.gz dist/ package.json pnpm-lock.yaml
+          tar -czf ../cdp-browser-mcp-dist-${{ github.ref_name }}.tar.gz dist/ package.json pnpm-lock.yaml README.md
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
