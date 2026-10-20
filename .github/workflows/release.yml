@@ -1,8 +1,9 @@
 name: Release
 
 # Tagged releases only, from main only. Builds dist/, publishes a GitHub
-# Release with the bundle, and publishes to npm when the NPM_TOKEN secret
-# is set (skipped otherwise). Dev branch can never cut a release.
+# Release with the bundle, and publishes to npm via Trusted Publishing
+# (tokenless OIDC — requires the package's Trusted Publisher on npmjs.com
+# to point at this repo + release.yml). Dev branch can never cut a release.
 #
 # npm dist-tag: prerelease tags (vX.Y.Z-foo) publish under "alpha",
 # stable tags publish under "latest".
@@ -11,7 +12,7 @@ name: Release
 #   1. Promote dev → main (promote.yml, gives main the release version).
 #   2. Tag main:  git tag vX.Y.Z && git push origin vX.Y.Z
 #   3. This workflow builds, attaches the bundle, publishes the GitHub
-#      Release and (when NPM_TOKEN is configured) npm.
+#      Release and npm (no token needed — OIDC via GitHub).
 
 on:
   push:
@@ -20,6 +21,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release:
@@ -46,7 +48,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'pnpm'
           cache-dependency-path: 'MCP Server/pnpm-lock.yaml'
           registry-url: 'https://registry.npmjs.org'
@@ -70,24 +72,9 @@ jobs:
             echo "tag=latest" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Check for npm credentials
-        id: npmcheck
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -n "$NPM_TOKEN" ]; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::NPM_TOKEN secret not set — skipping npm publish, GitHub Release only"
-          fi
-
-      - name: Publish to npm
-        if: steps.npmcheck.outputs.publish == 'true'
+      - name: Publish to npm (trusted publishing, tokenless OIDC)
         working-directory: MCP Server
-        run: pnpm publish --no-git-checks --tag ${{ steps.disttag.outputs.tag }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --tag ${{ steps.disttag.outputs.tag }}
 
       - name: Package release bundle
         run: |
