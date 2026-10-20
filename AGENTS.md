@@ -67,9 +67,10 @@ Package manager: **pnpm** (canonical). npm works for script invocation, but lock
 The maintainer's OpenCode config points `mcp.servers.cdp-browser` at the
 **local build** (`MCP Server/dist/index.js` run via `node`), with the
 published-npm variant (`npx cdp-mcp-server@latest`) commented out next to it.
-Workflow: `pnpm build` after code changes → verify against the local server
-→ only then promote and release. Machine-specific absolute paths live only
-in local tool config, never in repo files.
+Workflow: `pnpm build` after code changes → reconnect the server (/mcps) →
+verify against the local build → only then promote and release.
+Machine-specific absolute paths live only in local tool config, never in
+repo files.
 
 ## Development rules
 
