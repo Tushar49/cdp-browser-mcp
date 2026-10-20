@@ -28,7 +28,7 @@
     "browser-mcp"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "packageManager": "pnpm@12.6.0",
   "scripts": {

@@ -12,13 +12,15 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18, 20, 22]
+        node-version: [20, 22]
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
+        with:
+          package_json_file: 'MCP Server/package.json'
 
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4

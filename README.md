@@ -159,7 +159,7 @@ That's it. Two dependencies: `ws` (WebSocket client) and `@modelcontextprotocol/
 
 ### Install from npm (no clone needed)
 
-Requires Node.js 18+ only:
+Requires Node.js 20+ only:
 
 ```bash
 npm install -g cdp-mcp-server@alpha
