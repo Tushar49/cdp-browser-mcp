@@ -2,7 +2,7 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
-## [Unreleased]
+## [5.0.3] - 2026-10-21
 
 ### Added
 - **Connect-error classifier** — connect errors name the exact failure mode and print the exact fix command. Four modes: nothing listening on any debug port and no browser processes found (`no browser with debugging enabled` — launch with `--remote-debugging-port=9222` plus an explicit `--user-data-dir`); browser running but launched without the debug flag (same launch guidance; Chrome/Brave 153+ can enable the `chrome://inspect/#remote-debugging` toggle instead); debug port bound but `/json/version` returns 404 (gated remote-debugging active — click **Allow** on Chrome's permission dialog when the server connects, or relaunch with the flag + explicit non-default `--user-data-dir`); flag given but connection refused (Chrome 136+ default-profile restriction — pair the flag with a non-default `--user-data-dir`; Chrome for Testing exempt)
