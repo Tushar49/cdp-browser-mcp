@@ -33,6 +33,10 @@ the M136 default-profile debugging restriction).
    against twice-monthly Chrome churn.
 6. Live-browser verification per AGENTS.md checklist (flag mode + toggle
    mode) before every promote.
+7. Configuration surface = the launching client's per-server env block
+   (OpenCode `environment`, Claude Desktop/Cursor `env`) — the MCP-universal
+   mechanism; `config.ts` stays the only env reader. A global config file is
+   a deferred possibility (5.1+), not a 5.0.x item.
 
 ## 2. Release ladder
 
@@ -45,8 +49,8 @@ Full scope: `release-plan-v5.0.3.md`. Summary:
    generic) with exact fix commands in messages
 3. ApprovalModeDiscovery — toggle support: `DevToolsActivePort` → WS
    `/devtools/browser`, skip `/json/version`, "click Allow" UX
-4. Process command-line scan (opt-in `CDP_PROCESS_SCAN=true`) —
-   path-independent discovery for portable layouts
+4. Process command-line scan (default ON, `CDP_PROCESS_SCAN=false` to
+   disable) — path-independent discovery for portable layouts
 5. Dir-list extensions (Vivaldi/Opera), `CDP_USER_DATA` into config.ts,
    stale "15 tools" comment fix
 6. Docs: README troubleshooting; AGENTS toggle test case; CHANGELOG
