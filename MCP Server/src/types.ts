@@ -56,6 +56,12 @@ export interface ServerConfig {
   /** If set, auto-connect to this Chrome instance/profile on startup */
   autoConnectProfile: string;
 
+  /** Extra User Data dir checked first during discovery (CDP_USER_DATA) */
+  userDataDir: string;
+
+  /** Process command-line scan on discovery failure (CDP_PROCESS_SCAN, default ON) */
+  processScan: boolean;
+
   /** If true, expose 6 slim tools instead of 15 full tools (for small-context models) */
   slimMode: boolean;
 }

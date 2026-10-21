@@ -39,6 +39,12 @@ export function loadConfig(): ServerConfig {
 
     autoConnectProfile: process.env.CDP_PROFILE || '',
 
+    /** Extra User Data dir checked first during discovery (CDP_USER_DATA). */
+    userDataDir: process.env.CDP_USER_DATA || '',
+
+    /** Process command-line scan on discovery failure (default ON). */
+    processScan: process.env.CDP_PROCESS_SCAN !== 'false',
+
     slimMode: process.env.CDP_SLIM_MODE === 'true',
   };
 }
