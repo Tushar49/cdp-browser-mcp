@@ -60,7 +60,7 @@ import { getSlimTools, mapSlimToFull } from './tools/slim-mode.js';
 
 // ─── Bootstrap ──────────────────────────────────────────────────────
 
-const VERSION = '5.0.2';
+const VERSION = '5.0.3';
 
 const config = loadConfig();
 
@@ -71,6 +71,8 @@ const healthMonitor = new HealthMonitor(cdpClient, {
   cdpHost: config.cdpHost,
   cdpPort: config.cdpPort,
   preferredProfile: config.autoConnectProfile,
+  extraUserDataDirs: config.userDataDir ? [config.userDataDir] : [],
+  processScan: config.processScan,
 });
 
 const domainManager = new DomainManager();
@@ -500,7 +502,8 @@ registry.register(
     inputSchema: { type: 'object', properties: {} },
     handler: async () =>
       success(
-        `pong — CDP Browser MCP v${VERSION}\nConnected: ${cdpClient.isConnected}`,
+        `pong — CDP Browser MCP v${VERSION}\nConnected: ${cdpClient.isConnected}` +
+          (cdpClient.isConnected ? `\nMode: ${healthMonitor.connectionMode}` : ''),
       ),
   }),
 );
@@ -514,6 +517,10 @@ registry.register(
       const lines = [
         `## CDP Browser MCP Server v${VERSION}`,
         `Connected: ${cdpClient.isConnected}`,
+        ...(cdpClient.isConnected
+          ? [`Connection mode: ${healthMonitor.connectionMode}`]
+          : []),
+        `Process scan: ${config.processScan ? 'on' : 'off'}`,
         `Default timeout: ${config.globalTimeout}ms`,
         `Default cleanup: ${config.defaultCleanupStrategy}`,
         `Session TTL: ${config.sessionTTL}ms`,
@@ -549,7 +556,7 @@ if (config.slimMode) {
   registerInteractTools(registry, ctx);
   registerFormTools(registry, ctx);
 } else {
-  // Full mode: all 15 tools
+  // Full mode: all 14 tools
   registerTabsTools(registry, ctx);
   registerPageTools(registry, ctx);
   registerInteractTools(registry, ctx);

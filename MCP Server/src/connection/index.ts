@@ -10,14 +10,22 @@ export {
   resolveWsUrl,
   resolveWsUrlAsync,
   findBestInstance,
+  parseBrowserCommandLine,
+  scanBrowserProcesses,
 } from './browser-discovery.js';
-export type { DiscoverOptions, WsUrlResult } from './browser-discovery.js';
+export type {
+  DiscoverOptions,
+  WsUrlResult,
+  CommandLineInfo,
+  ProcessScanResult,
+} from './browser-discovery.js';
 
 export { HealthMonitor } from './health-monitor.js';
 export type {
   HealthStatus,
   HealthState,
   HealthMonitorOptions,
+  ConnectionMode,
 } from './health-monitor.js';
 
 export { DomainManager } from './domain-manager.js';

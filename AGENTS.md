@@ -73,7 +73,12 @@ code:
 1. `pnpm build` (inside `MCP Server/`) — dist must reflect your changes
 2. Reconnect the server: `/mcps` in the TUI → restart cdp-browser
 3. Verify behavior against the local build (tools are `cdp_browser_*`)
-4. Only then promote dev → main and release
+4. Connection work: test BOTH modes — flag mode
+   (`--user-data-dir=<dir> --remote-debugging-port=9222`, `ping` reports
+   `Mode: legacy`) and toggle mode (`chrome://inspect/#remote-debugging`
+   enabled, no flag, click **Allow** on the dialog, `ping` reports
+   `Mode: approval`)
+5. Only then promote dev → main and release
 
 Machine-specific absolute paths live only in local tool config, never in
 repo files. Package-manager preference: pnpm / `pnpm dlx` first; npx/npm

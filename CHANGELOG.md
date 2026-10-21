@@ -2,6 +2,20 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
+## [5.0.3] - 2026-10-21
+
+### Added
+- **Connect-error classifier** — connect errors name the exact failure mode and print the exact fix command. Four modes: nothing listening on any debug port and no browser processes found (`no browser with debugging enabled` — launch with `--remote-debugging-port=9222` plus an explicit `--user-data-dir`); browser running but launched without the debug flag (same launch guidance; Chrome/Brave 153+ can enable the `chrome://inspect/#remote-debugging` toggle instead); debug port bound but `/json/version` returns 404 (gated remote-debugging active — click **Allow** on Chrome's permission dialog when the server connects, or relaunch with the flag + explicit non-default `--user-data-dir`); flag given but connection refused (Chrome 136+ default-profile restriction — pair the flag with a non-default `--user-data-dir`; Chrome for Testing exempt)
+- **Approval-mode discovery** — the server connects through the `chrome://inspect/#remote-debugging` toggle by reading the `DevToolsActivePort` file the browser writes (no launch flag needed); `ping` and `status` now report the connection mode (`legacy` | `approval`)
+- **Process scan** (Windows/macOS/Linux) — reads running browser processes' command lines to find `--user-data-dir` and `--remote-debugging-port`, so portable/custom installs are discovered with zero configuration. Full command lines are never logged or returned — only the extracted directory/port
+- README: new "Connection troubleshooting" section (symptom → fix for each failure mode); npm README: compact troubleshooting guide + environment variables table
+
+### Changed
+- Process scan is ON by default; set `CDP_PROCESS_SCAN=false` to disable
+
+### Fixed
+- `CDP_USER_DATA` (extra User Data directory checked first during discovery) was undocumented in some env tables — now documented everywhere
+
 ## [5.0.2] - 2026-10-19
 
 ### Fixed

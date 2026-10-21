@@ -7,6 +7,7 @@ describe('loadConfig()', () => {
     'CDP_HOST', 'CDP_PORT', 'CDP_ACTION_TIMEOUT', 'CDP_NAVIGATION_TIMEOUT',
     'CDP_SNAPSHOT_TIMEOUT', 'CDP_TIMEOUT', 'CDP_SESSION_TTL',
     'CDP_DEBUGGER_TIMEOUT', 'CDP_CLEANUP_STRATEGY', 'CDP_TEMP_DIR', 'CDP_PROFILE',
+    'CDP_USER_DATA', 'CDP_PROCESS_SCAN',
   ];
 
   beforeEach(() => {
@@ -38,6 +39,18 @@ describe('loadConfig()', () => {
   it('defaultCleanupStrategy is "detach" by default', () => {
     const cfg = loadConfig();
     expect(cfg.defaultCleanupStrategy).toBe('detach');
+  });
+
+  it('processScan defaults to ON and can be disabled', () => {
+    expect(loadConfig().processScan).toBe(true);
+    process.env.CDP_PROCESS_SCAN = 'false';
+    expect(loadConfig().processScan).toBe(false);
+  });
+
+  it('reads CDP_USER_DATA into userDataDir', () => {
+    expect(loadConfig().userDataDir).toBe('');
+    process.env.CDP_USER_DATA = 'A:\\Browsers\\data';
+    expect(loadConfig().userDataDir).toBe('A:\\Browsers\\data');
   });
 
   it('globalTimeout is 60000 by default', () => {
