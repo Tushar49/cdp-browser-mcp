@@ -269,6 +269,25 @@ The server communicates over stdio using the MCP protocol. Any MCP-compatible cl
 
 ---
 
+## Connection troubleshooting
+
+When no browser is reachable, connect errors name the exact failure mode and print the exact fix command. Discovery also scans running browser processes' command lines to find `--user-data-dir` and `--remote-debugging-port`, so portable/custom installs are discovered with zero configuration — full command lines are never logged or returned, only the extracted directory/port. The server can additionally connect through the `chrome://inspect/#remote-debugging` toggle (approval mode) by reading the `DevToolsActivePort` file the browser writes; `ping` and `status` report the connection mode (`legacy` | `approval`).
+
+| Symptom | Fix |
+|---------|-----|
+| **"no browser with debugging enabled"** — nothing listening on any debug port, no browser processes found | Launch your browser with the debug flag plus an explicit `--user-data-dir` |
+| **Browser running, but launched without the debug flag** | Same launch guidance; Chrome/Brave 153+ can instead enable `chrome://inspect/#remote-debugging` → "Allow remote debugging for this browser instance" |
+| **Debug port bound, but `http://localhost:9222/json/version` returns 404** — the browser is running the new gated remote-debugging (the `chrome://inspect` toggle) | Click **Allow** on Chrome's permission dialog when the server connects (needs a visible browser window), or relaunch with the flag + explicit non-default `--user-data-dir` |
+| **Flag given, but connection refused** (Chrome 136+ default-profile restriction) | Pair `--remote-debugging-port` with an explicit **non-default** `--user-data-dir` (Chrome for Testing is exempt) |
+
+The launch command that works for all four modes (per-OS paths in Step 1 above):
+
+```bash
+chrome --remote-debugging-port=9222 --user-data-dir="<a non-default directory>"
+```
+
+---
+
 ## Tools Overview
 
 | Tool | Actions | Description |
@@ -597,6 +616,8 @@ WebSocket ping/pong every 30 seconds. If 2 consecutive pings fail, the connectio
 | `CDP_CLEANUP_STRATEGY` | `detach` | Default tab cleanup strategy: `close`, `detach`, or `none` |
 | `CDP_TEMP_DIR` | *(cwd)/.temp* | Directory for temp files (screenshots, PDFs). Resolved at runtime from cwd if empty |
 | `CDP_PROFILE` | — | Auto-connect to Chrome instance by name or User Data path on first tool call (lazy, not at startup) |
+| `CDP_USER_DATA` | — | Extra User Data directory checked first during discovery |
+| `CDP_PROCESS_SCAN` | `true` | Scan running browser processes' command lines for `--user-data-dir` / `--remote-debugging-port` during discovery. Set `false` to disable |
 | `CDP_SLIM_MODE` | `false` | Enable slim mode: 6 Playwright-compatible tools instead of 14. Ideal for 32K-context models |
 
 ---
