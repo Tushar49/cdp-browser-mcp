@@ -150,7 +150,14 @@ release — failure attribution and rollback stay clean.
 
 ## 6. Open decisions
 
-1. 5.1.0 packaging: engine + CDP freshness in one release (proposed) or two?
-2. FedCm/WebAuthn: 5.2 spikes or watch-only?
-3. README compatibility table (browsers × CDP domains): yes/no?
-4. Target dates for 5.0.3 / 5.1.0?
+**RESOLVED 2026-10-21 (owner):**
+1. 5.1.0 packaging: **together** — engine + CDP freshness in one release
+   (`release-plan-v5.1.0.md`).
+2. FedCm/WebAuthn: **FedCm stays watch-only** (no competitor exposes it via
+   MCP — Playwright MCP, Puppeteer, chrome-devtools-mcp all lack it);
+   **WebAuthn moves to 5.2 planned** (Puppeteer has it via CDP — parity
+   justifies; sandbox spike first, auth-critical).
+3. README compatibility table: **done** — shipped with the 5.0.3 polish pass
+   (browser × flag/toggle/process-scan matrix, tool-table drift fixed
+   12→14 tools, badge 5.0.3, dev-only references removed).
+4. Timing: **5.1.0 started immediately** after 5.0.3 release (2026-10-21).

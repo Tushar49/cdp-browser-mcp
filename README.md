@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.0.2-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-5.0.3-blue" alt="Version">
   <img src="https://img.shields.io/badge/tools-14-green" alt="Tools">
   <img src="https://img.shields.io/badge/sub--actions-90+-green" alt="Actions">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
@@ -162,7 +162,7 @@ That's it. Two dependencies: `ws` (WebSocket client) and `@modelcontextprotocol/
 Requires Node.js 20+ only:
 
 ```bash
-npm install -g cdp-mcp-server@alpha
+npm install -g cdp-mcp-server@latest
 ```
 
 Or point your MCP client straight at npx:
@@ -172,27 +172,11 @@ Or point your MCP client straight at npx:
   "mcpServers": {
     "cdp-browser": {
       "command": "npx",
-      "args": ["-y", "cdp-mcp-server@alpha"]
+      "args": ["-y", "cdp-mcp-server@latest"]
     }
   }
 }
 ```
-
-`@alpha` tracks prerelease versions; stable releases install with plain `cdp-mcp-server`.
-
-### Step 2b: Install commit hooks (optional, recommended)
-
-From the repo root (not `MCP Server/`):
-
-```bash
-# macOS/Linux/Git Bash on Windows
-bash .githooks/install.sh
-
-# PowerShell on Windows
-pwsh -File .githooks/install.ps1
-```
-
-This installs a friendly pre-commit reminder that nudges you to update `CHANGELOG.md` when you change code. It's a warning, not a block - commits never fail. Skip a single commit with `git commit --no-verify`. Disable entirely with `git config --unset core.hooksPath`.
 
 ### Step 3: Configure Your MCP Client
 
@@ -263,7 +247,7 @@ Add to `.cursor/mcp.json` in your project:
 node "MCP Server/dist/index.js"
 ```
 
-The server communicates over stdio using the MCP protocol. Any MCP-compatible client can connect. The frozen v4 monolith is parked at `_archive/legacy-server-v4.js` (reference only — do not run it).
+The server communicates over stdio using the MCP protocol. Any MCP-compatible client can connect.
 
 </details>
 
@@ -286,24 +270,37 @@ The launch command that works for all four modes (per-OS paths in Step 1 above):
 chrome --remote-debugging-port=9222 --user-data-dir="<a non-default directory>"
 ```
 
+## Browser compatibility
+
+| Browser | Flag mode | Toggle (approval) | Process scan | Notes |
+|---------|-----------|-------------------|--------------|-------|
+| Chrome 136+ | ✅ requires non-default `--user-data-dir` | ✅ Chrome 144+ | ✅ | default-profile restriction since Chrome 136 |
+| Brave | ✅ | ✅ (verified on 153) | ✅ (verified on 153) | portapps wrappers: launch inner `app\brave.exe`, not wrapper shortcut |
+| Edge | ✅ | ✅ Chrome 144+ | ✅ | same Chromium behavior |
+| Chrome Testing | ✅ no restriction | — | ✅ | recommended automated/CI setups |
+
+When a connection fails, the server auto-detects the failure mode and prints the exact fix — see Connection troubleshooting above.
+
 ---
 
 ## Tools Overview
 
 | Tool | Actions | Description |
 |------|---------|-------------|
-| `tabs` | 6 | Tab management — list, find, open, close, activate, info |
-| `page` | 14 | Navigation, snapshots, screenshots, content extraction, PDF, dialogs |
+| `tabs` | 7 | Tab management — list, find, open, close, activate, info, set profile |
+| `page` | 15 | Navigation, snapshots, screenshots, content extraction, PDF, dialogs, frames |
 | `interact` | 12 | Click, hover, type, fill, select, press, drag, scroll, upload, focus, check, tap |
-| `form` | 1 | **NEW** — Smart form filling engine. Handles text, combobox, checkbox, radio, select, date in one call |
+| `form` | 3 | Smart form filling engine — fill, read, clear; handles text, combobox, checkbox, radio, select, date in one call |
 | `execute` | 3 | JavaScript evaluation — expressions, async scripts, element-scoped calls |
 | `observe` | 6 | Console messages, network requests, performance metrics, downloads, HAR export |
 | `emulate` | 15 | Viewport, color scheme, geolocation, network throttling, timezone, vision deficiency |
-| `storage` | 6 | Cookie CRUD, storage clearing, quota inspection |
+| `storage` | 9 | Cookie CRUD, localStorage/sessionStorage management, storage clearing, quota inspection |
 | `intercept` | 6 | HTTP request interception — mock, modify, block network requests |
 | `cleanup` | 7 | Session management, disconnect, temp file cleanup, reset |
 | `browser` | 3 | Chrome/Edge/Brave instance detection, profile listing, connection switching |
 | `debug` | 21 | JS debugger, breakpoints, resource overrides, DOM/event breakpoints |
+| `ping` | — | Health check — server version, connection status, connection mode |
+| `status` | — | Server status — connection, config, sessions |
 
 ---
 
@@ -319,6 +316,7 @@ chrome --remote-debugging-port=9222 --user-data-dir="<a non-default directory>"
 | `close` | Close a tab | `tabId` | — |
 | `activate` | Bring tab to foreground | `tabId` | — |
 | `info` | Get tab details + connection status | `tabId` | — |
+| `set_profile` | Pin session to a specific Chrome profile | `profile` | — |
 
 ### `page` — Page Operations
 
@@ -338,6 +336,7 @@ chrome --remote-debugging-port=9222 --user-data-dir="<a non-default directory>"
 | `inject` | Inject script on every page load | `tabId`, `script` | — |
 | `add_style` | Inject CSS (inline or external URL) | `tabId`, `css` or `cssUrl` | `persistent` |
 | `bypass_csp` | Disable Content Security Policy | `tabId` | `enabled` |
+| `frames` | List all frames with id, URL, origin, depth (same-origin + OOP iframes) | `tabId` | — |
 
 ### `interact` — Element Interaction
 
@@ -360,7 +359,7 @@ chrome --remote-debugging-port=9222 --user-data-dir="<a non-default directory>"
 
 ### `form` — Smart Form Filling *(NEW in v5.0.0)*
 
-Fill entire forms in a single call. Auto-detects field types and handles framework-specific inputs.
+Fill entire forms in a single call. Auto-detects field types and handles framework-specific inputs. Actions: `fill` (set values), `read` (get current values), `clear` (reset all fields).
 
 | Parameter | Description | Required |
 |-----------|-------------|----------|
@@ -428,6 +427,9 @@ Set any combination of properties in a single call:
 | `clear_cookies` | Clear all cookies | `tabId` | — |
 | `clear_data` | Clear storage by type | `tabId` | `origin`, `types` |
 | `quota` | Check storage quota | `tabId` | — |
+| `get_storage` | Read localStorage/sessionStorage (whole object as JSON when `key` omitted) | `tabId` | `key`, `storageType`(`local`\|`session`) |
+| `set_storage` | Write a localStorage/sessionStorage key | `tabId`, `key`, `value` | `storageType`(`local`\|`session`) |
+| `delete_storage` | Remove a key, or clear the whole storage area when `key` omitted | `tabId` | `key`, `storageType`(`local`\|`session`) |
 
 ### `intercept` — HTTP Request Interception
 
@@ -659,7 +661,6 @@ Tool names are **Playwright-compatible** — agents that already know Playwright
 
 ```
 MCP Server/
-├── _archive/legacy-server-v4.js  # frozen v4 monolith (reference only)
 ├── src/
 │   ├── index.ts                 # Main entry point
 │   ├── config.ts                # Environment variables & constants
