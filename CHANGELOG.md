@@ -10,6 +10,7 @@ All notable changes to CDP Browser MCP Server will be documented in this file.
 
 - interact: **actionability gate** — Playwright-style `visible`/`stable`/`enabled`/`editable` checks + hit-target verification run before click/type/fill/select/tap (injected per-element script, backoff ladder `[20,50,100,100,500]`, `DOM.scrollIntoViewIfNeeded` before pointer actions). Deadline errors name the failed state and blocker tag. `force: true` skips the gate; `CDP_AUTO_WAIT=false` disables globally (default ON)
 - retry consolidation — three duplicate retry implementations replaced by one ladder-based helper; dead code removed (`utils/retry.ts`, `waitForCompletion`)
+- storage: **export_state / import_state** — one-shot auth-state snapshot/restore: all cookies browser-wide + current origin's localStorage as a Playwright-compatible JSON object; clearFirst option; other-origin localStorage reported with guidance (storage is per-origin)
 
 ## [5.0.3] - 2026-10-21
 
@@ -94,12 +95,6 @@ First stable v5 release on npm. Consolidates v5.0.0-alpha.1 → alpha.4.
 
 ### Changed
 - Version: 5.0.0-alpha.3
-
-## [Unreleased]
-
-### Added
-- `.githooks/` - pre-commit warning when code changes without CHANGELOG update. Non-blocking. Install with `bash .githooks/install.sh` or `pwsh -File .githooks/install.ps1`. Skip with `git commit --no-verify`. See `.githooks/README.md`.
-- scripts/start-chrome.{ps1,sh} - consistent Chrome launcher for CDP debugging port. No-ops if already running. Supports --isolated for fresh automation profile.
 
 ## [5.0.0-alpha.2] - 2026-04-22
 
