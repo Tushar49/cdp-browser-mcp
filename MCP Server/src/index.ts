@@ -501,6 +501,9 @@ async function ensureConnected(): Promise<void> {
 
 // ─── Demo Tools ─────────────────────────────────────────────────────
 
+const AUTO_CONNECT_HINT =
+  '\nBrowser connects automatically when you use any browser tool — just call tabs.list or page.goto.';
+
 registry.register(
   defineTool({
     name: 'ping',
@@ -509,7 +512,7 @@ registry.register(
     handler: async () =>
       success(
         `pong — CDP Browser MCP v${VERSION}\nConnected: ${cdpClient.isConnected}` +
-          (cdpClient.isConnected ? `\nMode: ${healthMonitor.connectionMode}` : ''),
+          (cdpClient.isConnected ? `\nMode: ${healthMonitor.connectionMode}` : AUTO_CONNECT_HINT),
       ),
   }),
 );
@@ -525,7 +528,7 @@ registry.register(
         `Connected: ${cdpClient.isConnected}`,
         ...(cdpClient.isConnected
           ? [`Connection mode: ${healthMonitor.connectionMode}`]
-          : []),
+          : [AUTO_CONNECT_HINT.trim()]),
         `Process scan: ${config.processScan ? 'on' : 'off'}`,
         `Default timeout: ${config.globalTimeout}ms`,
         `Default cleanup: ${config.defaultCleanupStrategy}`,
@@ -592,7 +595,10 @@ if (config.slimMode) {
 
 const server = new Server(
   { name: 'cdp-browser', version: VERSION },
-  { capabilities: { tools: {} } },
+  {
+    capabilities: { tools: {} },
+    instructions: `CDP Browser MCP attaches your REAL running browser (cookies, logins, extensions stay). 14 tools: tabs, page, interact, form, execute, observe, emulate, storage, intercept, debug, browser, cleanup, ping, status. The browser connects automatically on the first browser-tool call - ping/status may say Connected: false before that; just call tabs.list or page.goto. Two connection modes: launch flag (--remote-debugging-port + explicit --user-data-dir) or the browser built-in chrome://inspect/#remote-debugging toggle (a permission dialog appears - click Allow).`,
+  },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
