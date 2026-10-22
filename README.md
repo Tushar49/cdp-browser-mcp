@@ -275,9 +275,19 @@ chrome --remote-debugging-port=9222 --user-data-dir="<a non-default directory>"
 | Browser | Flag mode | Toggle (approval) | Process scan | Notes |
 |---------|-----------|-------------------|--------------|-------|
 | Chrome 136+ | ✅ requires non-default `--user-data-dir` | ✅ Chrome 144+ | ✅ | default-profile restriction since Chrome 136 |
+| Chrome Beta / Canary | ✅ | ✅ Chrome 144+ | ✅ | discovered as `Chrome Beta` / `Chrome Canary` |
+| Chromium | ✅ | ✅ Chrome 144+ | ✅ | restriction is Chrome-branding-gated — usually off in plain Chromium |
 | Brave | ✅ | ✅ (verified on 153) | ✅ (verified on 153) | portapps wrappers: launch inner `app\brave.exe`, not wrapper shortcut |
 | Edge | ✅ | ✅ Chrome 144+ | ✅ | same Chromium behavior |
-| Chrome Testing | ✅ no restriction | — | ✅ | recommended automated/CI setups |
+| Vivaldi | ✅ | ✅ Chrome 144+ | ✅ | discovery path added in 5.0.3 |
+| Opera | ✅ | ✅ Chrome 144+ | ✅ | discovery path added in 5.0.3 |
+| Chrome for Testing | ✅ no restriction | — | ✅ | recommended automated/CI setups |
+
+Legend:
+
+- **Flag mode** — launched with `--remote-debugging-port` (plus a non-default `--user-data-dir` where required)
+- **Toggle (approval)** — the browser built-in remote-debugging switch (`chrome://inspect/#remote-debugging`); the server reads the `DevToolsActivePort` file and you approve the connection dialog — no launch flag needed (Chromium 144+)
+- **Process scan** — the server reads running browser processes launch arguments to find custom/portable data dirs automatically (disable with `CDP_PROCESS_SCAN=false`)
 
 When a connection fails, the server auto-detects the failure mode and prints the exact fix — see Connection troubleshooting above.
 
