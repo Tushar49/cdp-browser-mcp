@@ -156,6 +156,9 @@ interface InteractArgs {
   amount?: number;
   x?: number;
   y?: number;
+  // wheel
+  deltaX?: number;
+  deltaY?: number;
   // upload
   files?: string[];
   // check
@@ -696,6 +699,115 @@ async function handleScroll(ctx: ServerContext, args: InteractArgs): Promise<Too
   }
 
   return ok(slimify(`Scrolled ${dir} by ${amount}px`, 'Scrolled'));
+}
+
+// ─── Coordinate-based mouse actions (5.1.0 A2) ──────────────────────
+
+async function handleMouseMove(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
+  if (args.x === undefined || args.y === undefined) {
+    return fail('mouse_move requires x and y (viewport coordinates).');
+  }
+  const sess = await getTabSession(ctx, args.tabId);
+  const mods = modifierFlags(args.modifiers);
+
+  if (args.humanMode) {
+    const path = generateBezierPath({ x: 0, y: 0 }, { x: args.x, y: args.y });
+    for (let i = 0; i < path.length; i++) {
+      await ctx.sendCommand('Input.dispatchMouseEvent', {
+        type: 'mouseMoved', x: path[i].x, y: path[i].y, modifiers: mods,
+      }, sess);
+      await sleep(i / path.length > 0.7 ? 15 + Math.random() * 20 : 5 + Math.random() * 10);
+    }
+  } else {
+    await ctx.sendCommand('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x: args.x, y: args.y, modifiers: mods,
+    }, sess);
+  }
+  return ok(slimify(`Mouse moved to (${args.x}, ${args.y})`, 'Mouse moved'));
+}
+
+async function handleMouseDown(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
+  if (args.x === undefined || args.y === undefined) {
+    return fail('mouse_down requires x and y (viewport coordinates).');
+  }
+  const sess = await getTabSession(ctx, args.tabId);
+  const button = args.button || 'left';
+  const buttonsMap: Record<string, number> = { left: 1, right: 2, middle: 4 };
+  await ctx.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: args.x, y: args.y, button,
+    clickCount: args.clickCount || 1, buttons: buttonsMap[button] || 1,
+    modifiers: modifierFlags(args.modifiers),
+  }, sess);
+  return ok(slimify(`Mouse ${button} pressed at (${args.x}, ${args.y})`, 'Pressed'));
+}
+
+async function handleMouseUp(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
+  if (args.x === undefined || args.y === undefined) {
+    return fail('mouse_up requires x and y (viewport coordinates).');
+  }
+  const sess = await getTabSession(ctx, args.tabId);
+  const button = args.button || 'left';
+  await ctx.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: args.x, y: args.y, button,
+    clickCount: args.clickCount || 1,
+    modifiers: modifierFlags(args.modifiers),
+  }, sess);
+  return ok(slimify(`Mouse ${button} released at (${args.x}, ${args.y})`, 'Released'));
+}
+
+async function handleClickXY(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
+  if (args.x === undefined || args.y === undefined) {
+    return fail('click_xy requires x and y (viewport coordinates).');
+  }
+  const sess = await getTabSession(ctx, args.tabId);
+  const button = args.button || 'left';
+  const clicks = args.clickCount || 1;
+  const buttonsMap: Record<string, number> = { left: 1, right: 2, middle: 4 };
+  const mods = modifierFlags(args.modifiers);
+
+  if (args.humanMode) {
+    const path = generateBezierPath({ x: 0, y: 0 }, { x: args.x, y: args.y });
+    for (let i = 0; i < path.length; i++) {
+      await ctx.sendCommand('Input.dispatchMouseEvent', {
+        type: 'mouseMoved', x: path[i].x, y: path[i].y, modifiers: mods,
+      }, sess);
+      await sleep(i / path.length > 0.7 ? 15 + Math.random() * 20 : 5 + Math.random() * 10);
+    }
+    await sleep(30 + Math.random() * 50);
+  } else {
+    await ctx.sendCommand('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x: args.x, y: args.y, modifiers: mods,
+    }, sess);
+    await sleep(50);
+  }
+
+  await ctx.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: args.x, y: args.y, button,
+    clickCount: clicks, buttons: buttonsMap[button] || 1, modifiers: mods,
+  }, sess);
+  await ctx.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: args.x, y: args.y, button, clickCount: clicks, modifiers: mods,
+  }, sess);
+
+  const netEvents = await waitForNetworkSettle(ctx, sess, 2000);
+  const netSuffix = netEvents.length > 0 ? `\nNetwork: ${netEvents.length} request(s) completed` : '';
+  return ok(slimify(`Clicked at (${args.x}, ${args.y})${netSuffix}`, 'Clicked'));
+}
+
+async function handleWheel(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
+  const deltaX = args.deltaX ?? 0;
+  const deltaY = args.deltaY ?? 0;
+  if (deltaX === 0 && deltaY === 0) {
+    return fail('wheel requires deltaX and/or deltaY (pixels; positive = down/right).');
+  }
+  const sess = await getTabSession(ctx, args.tabId);
+  const x = args.x ?? 0;
+  const y = args.y ?? 0;
+  await ctx.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mouseWheel', x, y, deltaX, deltaY,
+    modifiers: modifierFlags(args.modifiers),
+  }, sess);
+  return ok(slimify(`Wheeled (${deltaX}, ${deltaY}) at (${x}, ${y})`, 'Wheeled'));
 }
 
 async function handleUpload(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
@@ -1245,6 +1357,11 @@ const INTERACT_ACTIONS: Record<string, (ctx: ServerContext, args: InteractArgs) 
   press: handlePress,
   drag: handleDrag,
   scroll: handleScroll,
+  mouse_move: handleMouseMove,
+  mouse_down: handleMouseDown,
+  mouse_up: handleMouseUp,
+  click_xy: handleClickXY,
+  wheel: handleWheel,
   upload: handleUpload,
   focus: handleFocus,
   check: handleCheck,
@@ -1254,11 +1371,16 @@ const INTERACT_ACTIONS: Record<string, (ctx: ServerContext, args: InteractArgs) 
 // ─── Tool Registration ──────────────────────────────────────────────
 
 const INTERACT_DESCRIPTION = [
-  'Element interaction — click, type, fill, select, press, drag, scroll, upload, focus, check, tap.',
+  'Element interaction — click, type, fill, select, press, drag, scroll, upload, focus, check, tap, plus coordinate-based mouse (mouse_move, mouse_down, mouse_up, click_xy, wheel).',
   'Always take a snapshot first to get uid refs.',
   '',
   'Actions:',
   '- click: Click element (tabId, uid/selector; optional: button, clickCount, jsClick, modifiers, humanMode, waitFor — wait-for-element after click in same call)',
+  '- mouse_move: Move mouse to viewport coordinates (tabId, x, y; optional: humanMode — bezier mouse path)',
+  '- mouse_down: Press mouse button at viewport coordinates (tabId, x, y; optional: button, clickCount, modifiers) — press-hold workflows',
+  '- mouse_up: Release mouse button at viewport coordinates (tabId, x, y; optional: button, clickCount, modifiers)',
+  '- click_xy: Click at viewport coordinates without an element (tabId, x, y; optional: button, clickCount, modifiers, humanMode) — canvas/map/virtualized UIs; hit-target is the caller\u2019s responsibility',
+  '- wheel: Dispatch mouse wheel (tabId, deltaX and/or deltaY, optional: x, y, modifiers) — positive deltaY scrolls down',
   '- hover: Hover element (tabId, uid/selector)',
   '- type: Type text (tabId, text, uid/selector; optional: clear, submit, delay, charDelay, wordDelay, typoRate)',
   '- fill: Fill multiple fields [{uid, value, type}] (tabId, fields)',
@@ -1279,7 +1401,7 @@ const INTERACT_INPUT_SCHEMA = {
   properties: {
     action: {
       type: 'string' as const,
-      enum: ['click', 'hover', 'type', 'fill', 'select', 'press', 'drag', 'scroll', 'upload', 'focus', 'check', 'tap'] as const,
+      enum: ['click', 'hover', 'type', 'fill', 'select', 'press', 'drag', 'scroll', 'mouse_move', 'mouse_down', 'mouse_up', 'click_xy', 'wheel', 'upload', 'focus', 'check', 'tap'] as const,
       description: 'Interaction action.',
     },
     tabId: { type: 'string' as const, description: 'Tab ID.' },
@@ -1341,8 +1463,10 @@ const INTERACT_INPUT_SCHEMA = {
       description: 'Scroll direction.',
     },
     amount: { type: 'number' as const, description: 'Scroll pixels (default: 400).' },
-    x: { type: 'number' as const, description: 'Scroll-to X position.' },
-    y: { type: 'number' as const, description: 'Scroll-to Y position.' },
+    x: { type: 'number' as const, description: 'Viewport X coordinate (scroll target / mouse actions).' },
+    y: { type: 'number' as const, description: 'Viewport Y coordinate (scroll target / mouse actions).' },
+    deltaX: { type: 'number' as const, description: 'wheel action: horizontal wheel delta in pixels (positive = right).' },
+    deltaY: { type: 'number' as const, description: 'wheel action: vertical wheel delta in pixels (positive = down).' },
     files: {
       type: 'array' as const,
       items: { type: 'string' as const },
