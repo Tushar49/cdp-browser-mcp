@@ -11,6 +11,8 @@ All notable changes to CDP Browser MCP Server will be documented in this file.
 - interact: **actionability gate** — Playwright-style `visible`/`stable`/`enabled`/`editable` checks + hit-target verification run before click/type/fill/select/tap (injected per-element script, backoff ladder `[20,50,100,100,500]`, `DOM.scrollIntoViewIfNeeded` before pointer actions). Deadline errors name the failed state and blocker tag. `force: true` skips the gate; `CDP_AUTO_WAIT=false` disables globally (default ON)
 - retry consolidation — three duplicate retry implementations replaced by one ladder-based helper; dead code removed (`utils/retry.ts`, `waitForCompletion`)
 - storage: **export_state / import_state** — one-shot auth-state snapshot/restore: all cookies browser-wide + current origin's localStorage as a Playwright-compatible JSON object; clearFirst option; other-origin localStorage reported with guidance (storage is per-origin)
+- emulate: **device presets** — device: "Pixel 7" applies viewport + DSF + mobile + touch + UA in one call (9 presets: Pixel/Galaxy/iPhone/iPad/Desktop); device: list enumerates; explicit viewport/userAgent params override the preset
+- interact: wheel action falls back to JS scrolling when the browser never acks the CDP mouseWheel dispatch (Brave 153 observed; 3s timeout instead of 60s hang)
 
 ## [5.0.3] - 2026-10-21
 

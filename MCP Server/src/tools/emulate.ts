@@ -9,6 +9,8 @@ import type { ToolRegistry } from './registry.js';
 import type { ServerContext, ToolResult } from '../types.js';
 import { defineTool } from './base-tool.js';
 import { ok, fail } from '../utils/helpers.js';
+import { DEVICE_PRESETS, listDeviceNames } from './device-presets.js';
+const NL2 = String.fromCharCode(10);
 
 // ─── Network throttling presets (mirrors server.js) ─────────────────
 
@@ -53,6 +55,34 @@ async function handleEmulate(
       await ctx.sendCommand('Security.setIgnoreCertificateErrors', { ignore: false }, sess);
     } catch { /* ok */ }
     return ok('All emulation overrides reset.');
+  }
+
+  // ── Device preset (5.1.0 A4) ──
+  if (params.device === 'list') {
+    return ok('Available device presets:' + NL2 + listDeviceNames().map(function (d) { return '  ' + d; }).join(NL2));
+  }
+  if (params.device) {
+    const descriptor = DEVICE_PRESETS[params.device as string];
+    if (!descriptor) {
+      return fail('Unknown device preset: ' + (params.device as string) + '. Use device: list to see names.');
+    }
+    const explicitUA = !!params.userAgent;
+    const vp = params.viewport as Record<string, unknown> | undefined;
+    const width = (vp ? (vp.width as number) : descriptor.width) ?? descriptor.width;
+    const height = (vp ? (vp.height as number) : descriptor.height) ?? descriptor.height;
+    await ctx.sendCommand('Emulation.setDeviceMetricsOverride', {
+      width,
+      height,
+      deviceScaleFactor: descriptor.deviceScaleFactor,
+      mobile: descriptor.mobile,
+    }, sess);
+    if (descriptor.hasTouch) {
+      await ctx.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }, sess);
+    }
+    if (!explicitUA) {
+      await ctx.sendCommand('Emulation.setUserAgentOverride', { userAgent: descriptor.userAgent }, sess);
+    }
+    results.push(`Device: ${params.device} - ${width}x${height} @${descriptor.deviceScaleFactor}x`);
   }
 
   // ── Viewport ──
@@ -205,6 +235,7 @@ export function registerEmulateTools(
         "Use this to test responsive design, mobile views, or simulate slow networks. Set any combination of properties in one call. Pass 'reset: true' to clear all overrides.",
         '',
         'Operations (set any combination in a single call):',
+        '- device: Apply a device preset (optional: device name or list; overrides viewport+UA unless explicitly given)',
         '- viewport: Set viewport dimensions (optional: {width, height, deviceScaleFactor, mobile, touch, landscape})',
         '- colorScheme: Emulate preferred color scheme (optional: dark|light|auto)',
         '- userAgent: Override the browser user agent string (optional: string)',
@@ -235,6 +266,7 @@ export function registerEmulateTools(
               touch: { type: 'boolean' }, landscape: { type: 'boolean' },
             },
           },
+          device: { type: 'string', description: 'Device preset name (device: list to enumerate). Applied viewport + DSF + mobile + touch + UA. Explicit viewport/userAgent params override the preset.' },
           colorScheme: { type: 'string', enum: ['dark', 'light', 'auto'], description: 'Color scheme.' },
           userAgent: { type: 'string', description: 'User agent string.' },
           geolocation: {
