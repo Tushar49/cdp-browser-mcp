@@ -13,6 +13,20 @@ import { ok, fail, randomDelay, generateBezierPath } from '../utils/helpers.js';
 import { Errors, wrapError } from '../utils/error-handler.js';
 import { slimify } from './slim-mode.js';
 import {
+  runActionabilityGate,
+  scrollIntoViewIfNeeded,
+  retryWithLadder,
+  type ActionabilityState,
+  type GateTarget,
+} from '../utils/actionability.js';
+
+/** Adapt ctx.sendCommand to the gate's SendFn signature. */
+type SendFnAlias = (
+  method: string,
+  params?: Record<string, unknown>,
+  sessionId?: string,
+) => Promise<unknown>;
+import {
   sleep,
   waitForSelector,
   waitForText,
@@ -159,6 +173,8 @@ interface InteractArgs {
   // wheel
   deltaX?: number;
   deltaY?: number;
+  /** Skip actionability checks (escape hatch, default false — gate runs when CDP_AUTO_WAIT is on). */
+  force?: boolean;
   // upload
   files?: string[];
   // check
@@ -189,6 +205,8 @@ interface ResolvedElement {
   h: number;
   tag: string;
   label: string;
+  /** Present on the uid path — used by the actionability gate (5.1.0). */
+  objectId?: string;
 }
 
 /** Resolved element with objectId for JS calls. */
@@ -223,7 +241,12 @@ async function handleClick(ctx: ServerContext, args: InteractArgs): Promise<Tool
   const retryTimeout = args.timeout || ctx.config.actionTimeout;
 
   const el = await withRetry(
-    () => resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId),
+    () =>
+      resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId, {
+        states: ['visible', 'stable', 'enabled'],
+        hitCheck: true,
+        force: args.force,
+      }),
     retryTimeout,
   );
 
@@ -329,7 +352,10 @@ async function handleType(ctx: ServerContext, args: InteractArgs): Promise<ToolR
 
   // Resolve element and focus it
   const { objectId, resolvedSession } = await withRetry(async () => {
-    await resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId);
+      await resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId, {
+        states: ['visible', 'enabled', 'editable'],
+        force: args.force,
+      });
     return resolveElementObjectId(ctx, sess, args.uid, args.selector, args.tabId);
   }, retryTimeout);
 
@@ -503,7 +529,10 @@ async function handleSelect(ctx: ServerContext, args: InteractArgs): Promise<Too
   const retryTimeout = args.timeout || ctx.config.actionTimeout;
 
   const { objectId, resolvedSession } = await withRetry(async () => {
-    await resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId);
+      await resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId, {
+        states: ['visible', 'enabled', 'editable'],
+        force: args.force,
+      });
     return resolveElementObjectId(ctx, sess, args.uid, args.selector, args.tabId);
   }, retryTimeout);
 
@@ -1007,7 +1036,10 @@ async function handleCheck(ctx: ServerContext, args: InteractArgs): Promise<Tool
   const retryTimeout = args.timeout || ctx.config.actionTimeout;
 
   const { objectId, resolvedSession } = await withRetry(async () => {
-    await resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId);
+      await resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId, {
+        states: ['visible', 'enabled'],
+        force: args.force,
+      });
     return resolveElementObjectId(ctx, sess, args.uid, args.selector, args.tabId);
   }, retryTimeout);
 
@@ -1032,7 +1064,12 @@ async function handleTap(ctx: ServerContext, args: InteractArgs): Promise<ToolRe
   const sess = await getTabSession(ctx, args.tabId);
   const retryTimeout = args.timeout || ctx.config.actionTimeout;
   const el = await withRetry(
-    () => resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId),
+    () =>
+      resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId, {
+        states: ['visible', 'stable', 'enabled'],
+        hitCheck: true,
+        force: args.force,
+      }),
     retryTimeout,
   );
 
@@ -1109,7 +1146,7 @@ async function resolveElement(
     }, sess) as { result: { value: ResolvedElement | null } };
 
     if (!info.result.value) throw Errors.staleRef(uid);
-    return info.result.value;
+    return { ...info.result.value, objectId: object.objectId };
   }
 
   if (!selector) throw new Error('Provide uid or selector to identify the element.');
@@ -1136,17 +1173,42 @@ async function resolveElement(
 /**
  * Resolve + check actionability (visible, non-zero size, enabled).
  */
+/** Per-action actionability gate spec (5.1.0 A1). */
+interface GateSpec {
+  states: ActionabilityState[];
+  /** Run document.elementFromPoint hit-target verification (pointer actions). */
+  hitCheck?: boolean;
+  /** Skip the gate entirely (escape hatch). */
+  force?: boolean;
+}
+
 async function resolveAndCheck(
   ctx: ServerContext,
   sess: string,
   uid?: number,
   selector?: string,
   tabId?: string,
+  gate?: GateSpec,
 ): Promise<ResolvedElement> {
   // resolveElement already checks existence; add actionability checks
   const el = await resolveElement(ctx, sess, uid, selector, tabId);
   if (el.w === 0 && el.h === 0) {
     throw Errors.elementNotInteractable(uid ?? 0, 'Element has zero size — it may be hidden or collapsed.');
+  }
+  const active = gate && ctx.config.autoWait && !gate.force;
+  if (active && gate) {
+    const target: GateTarget = el.objectId
+      ? { objectId: el.objectId }
+      : { selector: selector ?? '' };
+    if (gate.hitCheck) {
+      // Scroll first so the hit-target check sees the element in-viewport
+      await scrollIntoViewIfNeeded(ctx.sendCommand as unknown as SendFnAlias, sess, target);
+    }
+    await runActionabilityGate(ctx.sendCommand as unknown as SendFnAlias, sess, target, {
+      states: gate.states,
+      hitCheck: gate.hitCheck,
+      timeoutMs: ctx.config.actionTimeout,
+    });
   }
   return el;
 }
@@ -1196,18 +1258,9 @@ async function resolveElementObjectId(
  * Retry a function until it succeeds or timeout expires.
  * Mirrors the withRetry pattern from server.js.
  */
+/** Retry helper — delegates to the consolidated ladder implementation (5.1.0 A1). */
 async function withRetry<T>(fn: () => Promise<T>, timeout: number): Promise<T> {
-  const start = Date.now();
-  let lastError: unknown;
-  while (Date.now() - start < timeout) {
-    try {
-      return await fn();
-    } catch (e) {
-      lastError = e;
-      await sleep(300);
-    }
-  }
-  throw lastError;
+  return retryWithLadder(fn, { timeoutMs: timeout });
 }
 
 /**

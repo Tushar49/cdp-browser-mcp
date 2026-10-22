@@ -45,6 +45,9 @@ export function loadConfig(): ServerConfig {
     /** Process command-line scan on discovery failure (default ON). */
     processScan: process.env.CDP_PROCESS_SCAN !== 'false',
 
+    /** Actionability gate before element interactions (default ON). */
+    autoWait: process.env.CDP_AUTO_WAIT !== 'false',
+
     slimMode: process.env.CDP_SLIM_MODE === 'true',
   };
 }

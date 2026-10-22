@@ -63,6 +63,9 @@ export interface ServerConfig {
   /** Process command-line scan on discovery failure (CDP_PROCESS_SCAN, default ON) */
   processScan: boolean;
 
+  /** Actionability gate before element interactions (CDP_AUTO_WAIT, default ON) */
+  autoWait: boolean;
+
   /** If true, expose 6 slim tools instead of 15 full tools (for small-context models) */
   slimMode: boolean;
 }
