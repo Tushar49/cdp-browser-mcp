@@ -832,11 +832,21 @@ async function handleWheel(ctx: ServerContext, args: InteractArgs): Promise<Tool
   const sess = await getTabSession(ctx, args.tabId);
   const x = args.x ?? 0;
   const y = args.y ?? 0;
-  await ctx.sendCommand('Input.dispatchMouseEvent', {
-    type: 'mouseWheel', x, y, deltaX, deltaY,
-    modifiers: modifierFlags(args.modifiers),
-  }, sess);
-  return ok(slimify(`Wheeled (${deltaX}, ${deltaY}) at (${x}, ${y})`, 'Wheeled'));
+  try {
+    // Short timeout: some Chromium builds (Brave 153 observed) never ack
+    // mouseWheel dispatches - fall back to JS scrolling instead of hanging.
+    await ctx.cdpClient.send('Input.dispatchMouseEvent', {
+      type: 'mouseWheel', x, y, deltaX, deltaY,
+      modifiers: modifierFlags(args.modifiers),
+    }, sess, 3000);
+    return ok(slimify(`Wheeled (${deltaX}, ${deltaY}) at (${x}, ${y})`, 'Wheeled'));
+  } catch {
+    // JS fallback: same viewport scroll result for page-level content
+    await ctx.sendCommand('Runtime.evaluate', {
+      expression: `window.scrollBy({ left: ${deltaX}, top: ${deltaY}, behavior: 'instant' })`,
+    }, sess);
+    return ok(slimify(`Scrolled (${deltaX}, ${deltaY}) via JS fallback - CDP wheel not acked by this browser`, 'Scrolled'));
+  }
 }
 
 async function handleUpload(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {

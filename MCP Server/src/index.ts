@@ -539,8 +539,8 @@ registry.register(
           if (missing.length > 0) {
             lines.push(`Notable domains missing: ${missing.join(', ')}`);
           }
-        } catch {
-          lines.push('CDP domains: unavailable (Schema.getDomains failed)');
+        } catch (e) {
+          lines.push('CDP domains: unavailable (' + (e instanceof Error ? e.message : String(e)) + ')');
         }
       }
       return success(lines.join('\n'));
