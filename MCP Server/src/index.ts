@@ -36,6 +36,7 @@ import { TabOwnership } from './session/tab-ownership.js';
 import { ModalStateManager } from './session/modal-state.js';
 import type { ModalState } from './session/modal-state.js';
 import { HealthMonitor } from './connection/health-monitor.js';
+import { DomainCapabilities } from './connection/capabilities.js';
 import { SnapshotCache } from './snapshot/cache.js';
 import { ToolRegistry } from './tools/registry.js';
 import { preprocessToolCall } from './tools/dispatch.js';
@@ -78,6 +79,9 @@ const healthMonitor = new HealthMonitor(cdpClient, {
 const domainManager = new DomainManager();
 const tabSessionService = new TabSessionService();
 const snapshotCache = new SnapshotCache();
+
+// CDP domain capability report (5.1.0 B1) — invalidated on disconnect below
+const capabilities = new DomainCapabilities();
 const registry = new ToolRegistry();
 
 // Wire auto-reconnect: when the WebSocket drops, let HealthMonitor retry
@@ -90,6 +94,7 @@ cdpClient.on('disconnected', () => {
   eventPipelineWired = false;
   domainManager.clearAll();
   snapshotCache.clear();
+  capabilities.clear();
   tabSessionService.clear();
   healthMonitor.onDisconnect().catch(() => {
     // Reconnect failed — next tool call will trigger autoConnect
@@ -455,6 +460,7 @@ function wireEventPipeline(serverCtx: ServerContext): void {
 // ─── Server Context (DI container) ──────────────────────────────────
 
 const ctx: ServerContext = {
+  capabilities,
   config,
   cdpClient,
   healthMonitor,
@@ -526,6 +532,17 @@ registry.register(
         `Session TTL: ${config.sessionTTL}ms`,
         `Registered tools: ${registry.size}`,
       ];
+      if (cdpClient.isConnected) {
+        try {
+          const { count, missing } = await capabilities.summarize(cdpClient);
+          lines.push(`CDP domains: ${count}`);
+          if (missing.length > 0) {
+            lines.push(`Notable domains missing: ${missing.join(', ')}`);
+          }
+        } catch {
+          lines.push('CDP domains: unavailable (Schema.getDomains failed)');
+        }
+      }
       return success(lines.join('\n'));
     },
   }),

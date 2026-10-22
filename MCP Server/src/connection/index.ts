@@ -21,6 +21,7 @@ export type {
 } from './browser-discovery.js';
 
 export { HealthMonitor } from './health-monitor.js';
+export { DomainCapabilities } from './capabilities.js';
 export type {
   HealthStatus,
   HealthState,

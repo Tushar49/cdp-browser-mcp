@@ -2,6 +2,12 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- interact: coordinate-based mouse actions — `mouse_move`, `mouse_down`, `mouse_up`, `click_xy`, `wheel` (viewport coords, `Input.dispatchMouseEvent`; `humanMode` bezier paths; no element needed — canvas/map/virtualized UIs)
+- `status` now reports the CDP domain capability set (count + notable missing domains) via `Schema.getDomains`, invalidated on reconnect — feature-detection backbone for version-gated protocol surface
+
 ## [5.0.3] - 2026-10-21
 
 ### Added

@@ -8,6 +8,7 @@
 
 import type { CDPClient } from './connection/cdp-client.js';
 import type { HealthMonitor } from './connection/health-monitor.js';
+import type { DomainCapabilities } from './connection/capabilities.js';
 import type { DomainManager } from './connection/domain-manager.js';
 import type { TabSessionService } from './connection/tab-session-service.js';
 import type { SessionManager } from './session/session-manager.js';
@@ -243,6 +244,9 @@ export type FileChooserHandler = (
  * state, and shared helpers — without any tool needing global imports.
  */
 export interface ServerContext {
+  /** CDP domain capability report (5.1.0 B1) — feature-detection backbone */
+  capabilities: DomainCapabilities;
+
   config: ServerConfig;
 
   /** The active CDP WebSocket client. */
