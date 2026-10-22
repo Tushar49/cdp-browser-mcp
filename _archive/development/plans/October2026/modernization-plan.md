@@ -58,6 +58,16 @@ Full scope: `release-plan-v5.0.3.md`. Summary:
 Exit criteria: all four failure modes produce correct actionable messages;
 toggle-mode tabs list works live; zero behavior change on the flag path.
 
+### v5.1.0 addendum — agent-friendliness (added 2026-10-23, SHIPPED on dev)
+
+Other-agent CDP misfire diagnosis: harness partial catalogs (14 tools, 2 shown)
+misled an agent into thinking only ping/status existed, and Connected: false
+(connect-exempt health tools) read as a dead end one step before auto-connect.
+Server-side fixes shipped (cd1e7f4):
+- MCP Server options now send instructions in the handshake (tool roster,
+  auto-connect behavior, approval/flag connection modes)
+- ping/status append the auto-connect hint when disconnected
+
 ### v5.1.0 — "Engine + Protocol Freshness"
 
 **Engine (Playwright gap closers, backlog items 6–9):**
