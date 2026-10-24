@@ -1,86 +1,95 @@
-/**
- * Capability report (5.1.0 B1) — Schema.getDomains fetch, caching,
- * invalidation, feature-gate helper.
- */
-import { describe, it, expect, vi } from 'vitest';
-import { DomainCapabilities, NOTABLE_DOMAINS } from '../../connection/capabilities.js';
+import { describe, it, expect } from 'vitest';
+import { DomainCapabilities, isMethodMissingError, NOTABLE_DOMAINS } from '../../connection/capabilities.js';
 import type { CDPClient } from '../../connection/cdp-client.js';
 
-const DOMAINS = [
-  { name: 'Page' }, { name: 'Network' }, { name: 'Input' },
-  { name: 'Emulation' }, { name: 'WebAuthn' },
-];
-
-function fakeClient(sendImpl: vi.Mock): CDPClient {
-  return { send: sendImpl } as unknown as CDPClient;
+/** CDPClient stand-in whose behavior is scripted per method. */
+function makeClient(behavior: (method: string) => 'ok' | 'notfound' | 'invalid') {
+  return {
+    send: async (method: string) => {
+      const b = behavior(method);
+      if (b === 'notfound') throw new Error(`'${method}' wasn't found`);
+      if (b === 'invalid') throw new Error(`Invalid parameters`);
+      return {};
+    },
+  } as unknown as CDPClient;
 }
 
-describe('DomainCapabilities', () => {
-  it('parses Schema.getDomains into a name set', async () => {
-    const send = vi.fn(async () => ({ domains: DOMAINS }));
-    const caps = new DomainCapabilities();
-    const set = await caps.get(fakeClient(send));
-    expect(set.has('Page')).toBe(true);
-    expect(set.has('WebAuthn')).toBe(true);
-    expect(set.has('FedCm')).toBe(false);
+describe('isMethodMissingError', () => {
+  it('classifies Chrome "wasn\'t found" errors as missing', () => {
+    expect(isMethodMissingError(new Error("'Schema.getDomains' wasn't found"))).toBe(true);
+    expect(isMethodMissingError(new Error("'Foo.bar' wasn't found"))).toBe(true);
+    expect(isMethodMissingError(new Error('method not found'))).toBe(true);
   });
 
-  it('caches: second get() does not re-send', async () => {
-    const send = vi.fn(async () => ({ domains: DOMAINS }));
+  it('does not classify domain/validation errors as missing', () => {
+    expect(isMethodMissingError(new Error('Invalid parameters'))).toBe(false);
+    expect(isMethodMissingError(new Error('A dialog is already open'))).toBe(false);
+  });
+});
+
+describe('DomainCapabilities multi-canary probing (B1)', () => {
+  it('treats "wasn\'t found" as absent', async () => {
     const caps = new DomainCapabilities();
-    const client = fakeClient(send);
-    await caps.get(client);
-    await caps.get(client);
-    expect(send).toHaveBeenCalledTimes(1);
+    const client = makeClient(() => 'notfound');
+    expect(await caps.has(client, 'WebAuthn')).toBe(false);
   });
 
-  it('clear() forces a re-fetch on next get()', async () => {
-    const send = vi.fn(async () => ({ domains: DOMAINS }));
+  it('treats Invalid parameters as present (required-params canary)', async () => {
     const caps = new DomainCapabilities();
-    const client = fakeClient(send);
-    await caps.get(client);
+    const client = makeClient(() => 'invalid');
+    expect(await caps.has(client, 'WebAuthn')).toBe(true);
+  });
+
+  it('treats success as present (read-only canary)', async () => {
+    const caps = new DomainCapabilities();
+    const client = makeClient(() => 'ok');
+    expect(await caps.has(client, 'Tracing')).toBe(true);
+  });
+
+  it('probes dotted method keys directly', async () => {
+    const caps = new DomainCapabilities();
+    const client = makeClient((m) => (m === 'Emulation.setCPUPerformanceOverride' ? 'invalid' : 'notfound'));
+    expect(await caps.has(client, 'Emulation.setCPUPerformanceOverride')).toBe(true);
+    expect(await caps.has(client, 'Emulation.setDoesNotExist')).toBe(false);
+  });
+
+  it('caches probes per connection (single send per method)', async () => {
+    const caps = new DomainCapabilities();
+    let calls = 0;
+    const client = {
+      send: async () => {
+        calls++;
+        throw new Error("'X.y' wasn't found");
+      },
+    } as unknown as CDPClient;
+    await caps.has(client, 'WebAuthn');
+    await caps.has(client, 'WebAuthn');
+    expect(calls).toBe(1);
+    expect(await caps.has(client, 'FedCm')).toBe(false);
+    expect(calls).toBe(2);
+  });
+
+  it('clear() invalidates the cache', async () => {
+    const caps = new DomainCapabilities();
+    let calls = 0;
+    const client = {
+      send: async () => {
+        calls++;
+        return {};
+      },
+    } as unknown as CDPClient;
+    await caps.has(client, 'WebAuthn');
     caps.clear();
-    await caps.get(client);
-    expect(send).toHaveBeenCalledTimes(2);
+    await caps.has(client, 'WebAuthn');
+    expect(calls).toBe(2);
   });
 
-  it('require() passes for present domains', async () => {
+  it('summarize counts present domains and lists missing ones', async () => {
     const caps = new DomainCapabilities();
-    await expect(
-      caps.require(fakeClient(vi.fn(async () => ({ domains: DOMAINS }))), 'Emulation'),
-    ).resolves.toBeUndefined();
-  });
-
-  it('require() throws DomainUnsupportedError naming the domain (+version hint)', async () => {
-    const caps = new DomainCapabilities();
-    const err = await caps
-      .require(
-        fakeClient(vi.fn(async () => ({ domains: DOMAINS }))),
-        'WebMCP',
-        '149',
-      )
-      .catch((e) => e);
-    expect(err.name).toBe('DomainUnsupportedError');
-    expect(err.message).toContain('WebMCP');
-    expect(err.message).toContain('Chrome 149+');
-  });
-
-  it('summarize() returns count + notable missing domains', async () => {
-    const caps = new DomainCapabilities();
-    const { count, missing } = await caps.summarize(
-      fakeClient(vi.fn(async () => ({ domains: DOMAINS }))),
-    );
-    expect(count).toBe(DOMAINS.length);
-    // FedCm/WebMCP not in DOMAINS → missing; WebAuthn present → not missing
-    expect(missing).toContain('FedCm');
-    expect(missing).toContain('WebMCP');
-    expect(missing).not.toContain('WebAuthn');
-    expect(NOTABLE_DOMAINS).toContain('WebMCP');
-  });
-
-  it('tolerates malformed Schema.getDomains responses', async () => {
-    const caps = new DomainCapabilities();
-    const set = await caps.get(fakeClient(vi.fn(async () => ({}))));
-    expect(set.size).toBe(0);
+    // Everything present except WebMCP (newest domain, may lag on older Chrome)
+    const client = makeClient((m) => (m === 'WebMCP.invokeTool' ? 'notfound' : 'invalid'));
+    const { count, missing } = await caps.summarize(client);
+    expect(count).toBe(NOTABLE_DOMAINS.length - 1);
+    expect(missing).toEqual(['WebMCP']);
   });
 });

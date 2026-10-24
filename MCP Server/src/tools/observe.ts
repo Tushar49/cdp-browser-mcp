@@ -6,7 +6,7 @@
  */
 
 import type { ToolRegistry } from './registry.js';
-import type { ServerContext, ToolResult } from '../types.js';
+import type { ServerContext, ToolResult, NetworkRequestEntry } from '../types.js';
 import { defineTool } from './base-tool.js';
 import { ok, fail } from '../utils/helpers.js';
 
@@ -54,9 +54,10 @@ async function handleNetwork(
   const sess = params._sessionId as string;
   await ctx.sendCommand('Network.enable', {}, sess);
 
-  // Network requests are tracked in an in-memory Map by the runtime layer.
-  // Stub: return structure from the runtime integration.
-  let reqs: Array<Record<string, unknown>> = [];
+  // Live in-memory store filled by the runtime event pipeline
+  // (Network.requestWillBeSent / responseReceived / loadingFinished in index.ts)
+  const reqMap = ctx.networkReqs.get(sess);
+  let reqs: NetworkRequestEntry[] = reqMap ? [...reqMap.values()] : [];
 
   const filter = params.filter as string | undefined;
   if (filter) {
@@ -70,18 +71,19 @@ async function handleNetwork(
   }
   const last = params.last as number | undefined;
   if (last) reqs = reqs.slice(-last);
-  if (params.clear) {
-    // clear would reset the in-memory request map
-  }
-
-  if (!reqs.length) return ok('No network requests captured yet. Navigate or interact to start capturing.');
-
   const lines = reqs.map(r => {
     const status = (r.status as number | string) || 'pending';
     const size = r.size != null ? `${((r.size as number) / 1024).toFixed(1)}KB` : '?';
     return `[${r.id}] ${r.method} ${status} ${size} ${r.type} ${(r.url as string).substring(0, 120)}`;
   });
-  return ok(`${reqs.length} request(s):\n\n${lines.join('\n')}`);
+  const output = reqs.length
+    ? `${reqs.length} request(s):\n\n${lines.join('\n')}`
+    : 'No network requests captured yet. Navigate or interact to start capturing.';
+
+  // clear:true resets the in-memory store after the listing is built
+  if (params.clear) reqMap?.clear();
+
+  return ok(output);
 }
 
 async function handleRequest(

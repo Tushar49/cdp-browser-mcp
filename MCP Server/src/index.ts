@@ -538,12 +538,12 @@ registry.register(
       if (cdpClient.isConnected) {
         try {
           const { count, missing } = await capabilities.summarize(cdpClient);
-          lines.push(`CDP domains: ${count}`);
+          lines.push(`CDP features (probed): ${count}/${count + missing.length}`);
           if (missing.length > 0) {
             lines.push(`Notable domains missing: ${missing.join(', ')}`);
           }
         } catch (e) {
-          lines.push('CDP domains: unavailable (' + (e instanceof Error ? e.message : String(e)) + ')');
+          lines.push('CDP features: unavailable (' + (e instanceof Error ? e.message : String(e)) + ')');
         }
       }
       return success(lines.join('\n'));

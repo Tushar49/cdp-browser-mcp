@@ -395,6 +395,40 @@ async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolR
   return ok(TokenOptimizer.capLength(fullOutput, maxLen, slim));
 }
 
+/**
+ * Page.captureScreenshot can hang indefinitely when the browser window is
+ * occluded/minimized and a prior interaction invalidated the last rendered
+ * frame (observed after clicks on pages with overlay iframes - the reCAPTCHA
+ * challenge): the compositor never produces the awaited frame and the CDP
+ * call never returns. Mitigation: short first wait, bring the tab to the
+ * front, retry once, then fail with the manual workaround named.
+ */
+async function captureScreenshotWithRecovery(
+  ctx: ServerContext,
+  sess: string,
+  tabId: string,
+  params: Record<string, unknown>,
+): Promise<string> {
+  const attempt = (timeoutMs: number) =>
+    ctx.cdpClient.send('Page.captureScreenshot', params, sess, timeoutMs) as Promise<{ data: string }>;
+  try {
+    return (await attempt(15000)).data;
+  } catch (err) {
+    if (!/timed out/i.test(err instanceof Error ? err.message : String(err))) throw err;
+  }
+  // Timed out - wake the tab and retry once
+  try { await ctx.sendCommand('Page.bringToFront', {}, sess); } catch { /* best effort */ }
+  try { await ctx.cdpClient.send('Target.activateTarget', { targetId: tabId }); } catch { /* best effort */ }
+  try {
+    return (await attempt(20000)).data;
+  } catch {
+    throw new Error(
+      'Page.captureScreenshot is not answering - the browser window is likely occluded or minimized ' +
+      'with a pending frame (seen after interactions on pages with overlay iframes). ' +
+      'Bring the browser window to the foreground or reload the tab, then retry.'
+    );
+  }
+}
 async function handleScreenshot(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
   const params: Record<string, unknown> = {};
@@ -435,7 +469,7 @@ async function handleScreenshot(ctx: ServerContext, args: PageArgs): Promise<Too
       return fail(`Could not get layout for element uid=${args.uid}. It may be hidden or off-screen.`);
     }
 
-    const { data } = await ctx.sendCommand('Page.captureScreenshot', params, sess) as { data: string };
+    const data = await captureScreenshotWithRecovery(ctx, sess, args.tabId, params);
     return saveOrReturnScreenshot(data, params.format as string, args.path);
   }
 
@@ -463,8 +497,8 @@ async function handleScreenshot(ctx: ServerContext, args: PageArgs): Promise<Too
 
     let captureData: string;
     try {
-      const result = await ctx.sendCommand('Page.captureScreenshot', params, sess) as { data: string };
-      captureData = result.data;
+      const result = await captureScreenshotWithRecovery(ctx, sess, args.tabId, params);
+      captureData = result;
     } finally {
       // Restore original viewport
       await ctx.sendCommand('Emulation.clearDeviceMetricsOverride', {}, sess).catch(() => {});
@@ -475,7 +509,7 @@ async function handleScreenshot(ctx: ServerContext, args: PageArgs): Promise<Too
   }
 
   // Viewport screenshot
-  const { data } = await ctx.sendCommand('Page.captureScreenshot', params, sess) as { data: string };
+  const data = await captureScreenshotWithRecovery(ctx, sess, args.tabId, params);
   return saveOrReturnScreenshot(data, params.format as string, args.path);
 }
 
