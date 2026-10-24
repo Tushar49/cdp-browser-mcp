@@ -1134,10 +1134,12 @@ async function resolveElement(
       throw Errors.staleRef(uid);
     }
 
+    // Route to the OOP-frame child session when this uid lives in one (5.1.0 A5)
+    const elemSess = ctx.tabSessions.getRefSession(sess, uid) ?? sess;
     // Resolve backendNodeId to objectId for metadata extraction
     const { object } = await ctx.sendCommand('DOM.resolveNode', {
       backendNodeId,
-    }, sess) as { object: { objectId?: string } };
+    }, elemSess) as { object: { objectId?: string } };
     if (!object?.objectId) throw Errors.staleRef(uid);
 
     // Get bounding rect and element info via JS
@@ -1153,7 +1155,7 @@ async function resolveElement(
       }`,
       objectId: object.objectId,
       returnByValue: true,
-    }, sess) as { result: { value: ResolvedElement | null } };
+    }, elemSess) as { result: { value: ResolvedElement | null } };
 
     if (!info.result.value) throw Errors.staleRef(uid);
     return { ...info.result.value, objectId: object.objectId };
@@ -1205,6 +1207,7 @@ async function resolveAndCheck(
   if (el.w === 0 && el.h === 0) {
     throw Errors.elementNotInteractable(uid ?? 0, 'Element has zero size — it may be hidden or collapsed.');
   }
+  const elemSess = uid !== undefined ? (ctx.tabSessions.getRefSession(sess, uid) ?? sess) : sess;
   const active = gate && ctx.config.autoWait && !gate.force;
   if (active && gate) {
     const target: GateTarget = el.objectId
@@ -1212,9 +1215,9 @@ async function resolveAndCheck(
       : { selector: selector ?? '' };
     if (gate.hitCheck) {
       // Scroll first so the hit-target check sees the element in-viewport
-      await scrollIntoViewIfNeeded(ctx.sendCommand as unknown as SendFnAlias, sess, target);
+      await scrollIntoViewIfNeeded(ctx.sendCommand as unknown as SendFnAlias, elemSess, target);
     }
-    await runActionabilityGate(ctx.sendCommand as unknown as SendFnAlias, sess, target, {
+    await runActionabilityGate(ctx.sendCommand as unknown as SendFnAlias, elemSess, target, {
       states: gate.states,
       hitCheck: gate.hitCheck,
       timeoutMs: ctx.config.actionTimeout,
@@ -1244,12 +1247,13 @@ async function resolveElementObjectId(
       throw Errors.staleRef(uid);
     }
 
+    const elemSess = ctx.tabSessions.getRefSession(sess, uid) ?? sess;
     const { object } = await ctx.sendCommand('DOM.resolveNode', {
       backendNodeId,
-    }, sess) as { object: { objectId?: string } };
+    }, elemSess) as { object: { objectId?: string } };
     if (!object?.objectId) throw Errors.staleRef(uid);
 
-    return { objectId: object.objectId, resolvedSession: sess };
+    return { objectId: object.objectId, resolvedSession: elemSess };
   }
 
   if (!selector) throw new Error('Provide uid or selector to identify the element.');

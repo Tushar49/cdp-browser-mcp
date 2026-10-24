@@ -14,6 +14,7 @@ All notable changes to CDP Browser MCP Server will be documented in this file.
 - emulate: **device presets** — device: "Pixel 7" applies viewport + DSF + mobile + touch + UA in one call (9 presets: Pixel/Galaxy/iPhone/iPad/Desktop); device: list enumerates; explicit viewport/userAgent params override the preset
 - agent-friendliness: MCP server now sends instructions in the handshake (tool roster + auto-connect + connection modes) and ping/status guide agents to just call any browser tool when disconnected — fixes agents giving up after seeing Connected: false
 - interact: wheel action falls back to JS scrolling when the browser never acks the CDP mouseWheel dispatch (Brave 153 observed; 3s timeout instead of 60s hang)
+- interact: **OOP-frame routing** - element interactions resolve and execute through the owning iframe's CDP session when a uid lives inside an out-of-process iframe (snapshot refRouting map consulted for `DOM.resolveNode`, metadata extraction, actionability gate, and JS fallback paths; `resolvedSession` now returns the child session). Physical pointer dispatches stay on the main page session (compositor routes by viewport coords). Fixes staleRef/unresolved errors on cross-frame uids
 
 ## [5.0.3] - 2026-10-21
 

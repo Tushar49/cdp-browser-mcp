@@ -38,9 +38,13 @@ describe('retryWithLadder()', () => {
       calls++;
       throw new Error('nope');
     }, { timeoutMs: 260, ladder: ACTIONABILITY_LADDER });
+    // Attach the rejection expectation before advancing — with fake timers the
+    // deadline rejection fires inside advanceTimersByTimeAsync, and a late
+    // handler registers as an unhandled rejection (vitest exit-code 1).
+    const rejection = expect(p).rejects.toThrow('nope');
     // Advance past the deadline; the ladder self-schedules inside
     await vi.advanceTimersByTimeAsync(2000);
-    await expect(p).rejects.toThrow('nope');
+    await rejection;
     // 260ms budget covers 20+50+100+100 = 270? No — deadline cuts after 260,
     // so 4 attempts (3 full waits) minimum. Assert bounded, not exact.
     expect(calls).toBeGreaterThanOrEqual(3);
