@@ -298,8 +298,11 @@ async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolR
   let nodeCount: number;
   let allOptimized: AXNode[];
 
-  if (childSessions.size > 0) {
-    // Multi-frame capture: main + OOP iframes
+  // Multi-frame capture: main frame + same-origin frames + OOP iframes.
+  // NOT gated on childSessions: same-origin iframe content (e.g. the reCAPTCHA
+  // widget) also needs per-frame trees, and has no OOP session to discover
+  // (A5b fix - the old gate skipped frame capture whenever no OOPIF existed).
+  {
     const fullTree = await captureFullTree(cdpSend as any, sess, childSessions);
 
     const optimizedMain = TokenOptimizer.optimize(fullTree.mainNodes);
@@ -333,14 +336,6 @@ async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolR
     snapshot = allParts.join('\n');
     allOptimized = [...optimizedMain, ...frameOptimized];
     nodeCount = countNodes(allOptimized);
-  } else {
-    // Single-frame capture (common case)
-    const tree = await captureAccessibilityTree(cdpSend as any, sess);
-    const optimized = TokenOptimizer.optimize(tree);
-    resolver.assignRefs(optimized);
-    snapshot = serializeTree(optimized);
-    allOptimized = optimized;
-    nodeCount = countNodes(optimized);
   }
 
   // Get page title and URL

@@ -1146,8 +1146,20 @@ async function resolveElement(
     const info = await ctx.sendCommand('Runtime.callFunctionOn', {
       functionDeclaration: `function() {
         const r = this.getBoundingClientRect();
+        // Translate frame-viewport coords to main-page viewport coords:
+        // getBoundingClientRect inside a same-origin iframe is relative to
+        // that iframe's viewport. Walk window.frameElement up to the main
+        // frame accumulating each iframe element's rect origin (A5b).
+        let fx = 0, fy = 0, w = window;
+        try {
+          while (w.frameElement) {
+            const fr = w.frameElement.getBoundingClientRect();
+            fx += fr.left; fy += fr.top;
+            w = w.parent;
+          }
+        } catch (e) { /* cross-origin boundary — offsets stay 0 */ }
         return {
-          x: r.x + r.width / 2, y: r.y + r.height / 2,
+          x: r.x + r.width / 2 + fx, y: r.y + r.height / 2 + fy,
           w: r.width, h: r.height,
           tag: this.tagName.toLowerCase(),
           label: (this.getAttribute('aria-label') || this.textContent || '').trim().substring(0, 60),

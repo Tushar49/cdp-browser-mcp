@@ -20,13 +20,18 @@ Brave instance via `PLAYWRIGHT_MCP_EXECUTABLE_PATH`.
 
 ## Bugs / gaps found (feed into 5.1.0)
 
-1. **Snapshot does not pierce OOP iframes** (the big one). reCAPTCHA widget surfaces as
+1. **Snapshot does not pierce iframes** (the big one). reCAPTCHA widget surfaces as
    `IframePresentational "reCAPTCHA" [ref=22]` with no children — the checkbox gets no uid, so
    ref-based interaction is impossible; only coordinate clicks work. Playwright MCP pierces frames:
    `iframe [ref=e27]: checkbox "I'm not robot" [ref=f1e7]` (frame-scoped refs `f1e*`).
-   A5's child-session routing is the prerequisite and is done; what's missing is merging the
-   auto-attached child-session trees under their iframe nodes in the accessibility snapshot.
-   Action: extend `snapshot/accessibility.ts` + `page.ts` full-tree assembly (call it A5b).
+   **RESOLVED same day (A5b, two-part):** (a) the reCAPTCHA iframe is actually same-origin
+   (www.google.com on www.google.com) — no OOPIF target exists; the multi-frame snapshot path was
+   gated on OOP child sessions and never ran — gate removed, always-on per-frame capture.
+   (b) OOPIF wiring: `Target.setAutoAttach` fired but nothing consumed `Target.attachedToTarget` —
+   event listener added to TabSessionService. Also fixed: uid→session routing was populated before
+   uids existed (always empty), and frame-relative bounding rects were dispatched as main-viewport
+   coordinates (fixed via `window.frameElement` offset walk inside the resolve script).
+   Live-verified: checkbox `[checked, focused]` after ref-based click.
 2. **`Page.captureScreenshot` hangs after in-OOPIF clicks** (observed 2x on reCAPTCHA demo after
    `click_xy` into the widget; both cleared by reload). Hypothesis: challenge `bframe` OOPIF
    overlay/spinner blocks main-surface capture. Workaround today: reload. Needs investigation
