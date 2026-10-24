@@ -15,6 +15,7 @@ All notable changes to CDP Browser MCP Server will be documented in this file.
 - agent-friendliness: MCP server now sends instructions in the handshake (tool roster + auto-connect + connection modes) and ping/status guide agents to just call any browser tool when disconnected — fixes agents giving up after seeing Connected: false
 - interact: wheel action falls back to JS scrolling when the browser never acks the CDP mouseWheel dispatch (Brave 153 observed; 3s timeout instead of 60s hang)
 - interact: **OOP-frame routing** - element interactions resolve and execute through the owning iframe's CDP session when a uid lives inside an out-of-process iframe (snapshot refRouting map consulted for `DOM.resolveNode`, metadata extraction, actionability gate, and JS fallback paths; `resolvedSession` now returns the child session). Physical pointer dispatches stay on the main page session (compositor routes by viewport coords). Fixes staleRef/unresolved errors on cross-frame uids
+- snapshot: **OOP-frame piercing (A5b)** - auto-attach event wiring is now live: `Target.attachedToTarget`/`detachedFromTarget` events feed the child-session registry, so cross-origin iframe content appears in snapshots as `[frame N]` sections with uid refs. Refs inside frames route to the owning iframe's CDP session (via the OOP-frame routing above). Also fixes an ordering bug where the uid→session routing map was populated before uids were assigned - it was always empty, which silently disabled cross-frame interaction
 
 ## [5.0.3] - 2026-10-21
 

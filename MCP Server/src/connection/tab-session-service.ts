@@ -9,6 +9,7 @@
  */
 
 import type { CDPClient } from './cdp-client.js';
+import type { CDPEvent } from '../types.js';
 
 export class TabSessionService {
   /** tabId (targetId) → CDP sessionId */
@@ -26,6 +27,12 @@ export class TabSessionService {
   /** uid → childSessionId routing for cross-frame element resolution */
   private refSessionRouting = new Map<string, Map<number, string>>();
 
+  /** CDP sessionId → tabId (reverse lookup for auto-attach event routing) */
+  private sessionToTab = new Map<string, string>();
+
+  /** CDP clients already wired for auto-attach event routing */
+  private wiredClients = new WeakSet<CDPClient>();
+
   /**
    * Get (or create) a CDP session for a tab.
    *
@@ -33,15 +40,23 @@ export class TabSessionService {
    * Otherwise calls Target.attachToTarget with flatten: true.
    */
   async getSession(cdpClient: CDPClient, tabId: string): Promise<string> {
+    // Idempotent: register auto-attach event routing before any session can
+    // emit Target.attachedToTarget (no missed events on first attach)
+    this.wireAutoAttachEvents(cdpClient);
+
     // Check the CDPClient's own session pool first, then our map
     const pooled = cdpClient.getPooledSession(tabId);
     if (pooled) {
       this.sessions.set(tabId, pooled);
+      this.sessionToTab.set(pooled, tabId);
       return pooled;
     }
 
     const existing = this.sessions.get(tabId);
-    if (existing) return existing;
+    if (existing) {
+      this.sessionToTab.set(existing, tabId);
+      return existing;
+    }
 
     const result = await cdpClient.send('Target.attachToTarget', {
       targetId: tabId,
@@ -50,6 +65,7 @@ export class TabSessionService {
 
     const sessionId = result.sessionId;
     this.sessions.set(tabId, sessionId);
+    this.sessionToTab.set(sessionId, tabId);
     cdpClient.poolSession(tabId, sessionId);
 
     // Enable auto-attach for OOP (cross-origin) iframe discovery
@@ -92,19 +108,44 @@ export class TabSessionService {
   }
 
   /**
-   * Enable Target.setAutoAttach on a tab session to discover OOP iframes.
+   * Register Target.autoAttach event routing (idempotent per CDP client).
+   *
+   * `Target.attachedToTarget` events emitted by managed page sessions are
+   * translated into child-session registrations (OOP iframes);
+   * `Target.detachedFromTarget` prunes them. This is what feeds
+   * `captureFullTree`'s multi-frame snapshot and the uid → child-session
+   * routing used for cross-frame element interaction.
    */
-  async setupAutoAttach(cdpClient: CDPClient, tabId: string): Promise<void> {
-    const sessionId = await this.getSession(cdpClient, tabId);
-    try {
-      await cdpClient.send('Target.setAutoAttach', {
-        autoAttach: true,
-        waitForDebuggerOnStart: false,
-        flatten: true,
-      }, sessionId);
-    } catch {
-      // Older Chrome versions may not support auto-attach on page sessions
-    }
+  private wireAutoAttachEvents(cdpClient: CDPClient): void {
+    if (this.wiredClients.has(cdpClient)) return;
+    this.wiredClients.add(cdpClient);
+
+    cdpClient.on('event', (event: CDPEvent) => {
+      if (event.method === 'Target.attachedToTarget' && event.sessionId) {
+        const parentSessionId = event.sessionId;
+        // Only page sessions we manage — browser-level / foreign events ignored
+        if (!this.sessionToTab.has(parentSessionId)) return;
+        const params = event.params as {
+          sessionId?: string;
+          targetInfo?: { targetId?: string; type?: string; url?: string };
+        };
+        if (!params?.sessionId || !params.targetInfo?.targetId) return;
+        if (params.targetInfo.type !== 'iframe') return;
+        this.addChildSession(
+          parentSessionId,
+          params.targetInfo.targetId,
+          params.sessionId,
+          params.targetInfo.url ?? '',
+        );
+      } else if (event.method === 'Target.detachedFromTarget') {
+        const params = event.params as { sessionId?: string };
+        if (!params?.sessionId) return;
+        const parentSessionId = this.getParentSession(params.sessionId);
+        if (parentSessionId) {
+          this.removeChildSession(parentSessionId, params.sessionId);
+        }
+      }
+    });
   }
 
   /** Track a child session (OOP iframe) under a parent session. */
@@ -173,6 +214,7 @@ export class TabSessionService {
         this.childSessions.delete(sessionId);
       }
       this.refSessionRouting.delete(sessionId);
+      this.sessionToTab.delete(sessionId);
       cdpClient?.unpoolSession(tabId);
     }
     this.sessions.delete(tabId);
@@ -195,6 +237,7 @@ export class TabSessionService {
     this.childSessions.clear();
     this.childToParent.clear();
     this.refSessionRouting.clear();
+    this.sessionToTab.clear();
   }
 
   /** Iterate over all [tabId, sessionId] pairs. */

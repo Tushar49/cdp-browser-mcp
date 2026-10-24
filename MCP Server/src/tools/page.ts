@@ -270,7 +270,7 @@ async function handleFrames(ctx: ServerContext, args: PageArgs): Promise<ToolRes
 async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
 
-  const { captureAccessibilityTree, captureFullTree, serializeTree } = await import('../snapshot/accessibility.js');
+  const { captureAccessibilityTree, captureFullTree, serializeTree, tagNodesWithSession } = await import('../snapshot/accessibility.js');
   const { TokenOptimizer } = await import('../snapshot/token-optimizer.js');
   const { ElementResolver } = await import('../snapshot/element-resolver.js');
 
@@ -309,10 +309,16 @@ async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolR
     const slim = isSlimMode();
     const frameParts: string[] = [];
     const frameOptimized: AXNode[] = [];
+    // uid -> childSessionId routing, built AFTER resolver.assignRefs - uids only
+    // exist post-assignment, so captureFullTree's early tagging pass finds none
+    // (A5b fix: this map was always empty, disabling cross-frame interaction)
+    const refRouting = new Map<number, string>();
     let frameIndex = 1;
-    for (const [, { nodes }] of fullTree.frameNodes) {
+    for (const [targetId, { nodes }] of fullTree.frameNodes) {
       const optimizedFrame = TokenOptimizer.optimize(nodes);
       resolver.assignRefs(optimizedFrame);
+      const childInfo = childSessions.get(targetId);
+      if (childInfo) tagNodesWithSession(optimizedFrame, childInfo.sessionId, refRouting);
       // Slim mode shortens "[frame N] " (10 chars) → "[fN] " (5 chars).
       const framePrefix = slim ? `[f${frameIndex}] ` : `[frame ${frameIndex}] `;
       frameParts.push(serializeTree(optimizedFrame, 0, framePrefix));
@@ -321,7 +327,7 @@ async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolR
     }
 
     // Store uid → session routing for cross-frame element interaction
-    ctx.tabSessions.setRefRouting(sess, fullTree.refRouting);
+    ctx.tabSessions.setRefRouting(sess, refRouting);
 
     const allParts = [mainSnapshot, ...frameParts].filter(Boolean);
     snapshot = allParts.join('\n');
