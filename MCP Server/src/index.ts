@@ -537,8 +537,12 @@ registry.register(
       ];
       if (cdpClient.isConnected) {
         try {
-          const { count, missing } = await capabilities.summarize(cdpClient);
-          lines.push(`CDP features (probed): ${count}/${count + missing.length}`);
+          // Probe through a managed page session - the browser-level endpoint
+          // only serves browser-wide domains, so page-scoped domains (Overlay,
+          // FindInPage, Ads, ...) report "wasn't found" without one.
+          const firstSession = tabSessionService.entries().next().value?.[1] as string | undefined;
+          const { count, missing } = await capabilities.summarize(cdpClient, firstSession);
+          lines.push(`CDP features (probed${firstSession ? ' on page session' : ' browser-level - no page session'}): ${count}/${count + missing.length}`);
           if (missing.length > 0) {
             lines.push(`Notable domains missing: ${missing.join(', ')}`);
           }

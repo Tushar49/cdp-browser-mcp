@@ -78,8 +78,13 @@ export class DomainCapabilities {
    * Probe a single canary / method. Empty params on purpose:
    * required-params canaries fail validation (proving presence), read-only
    * canaries succeed (proving presence), unknown methods report "wasn't found".
+   *
+   * Pass a page-session id when probing page-scoped domains: the browser-level
+   * endpoint only serves browser-wide domains (Target/Browser/SystemInfo/
+   * Tracing/Extensions...), so page-scoped domains report "wasn't found"
+   * without a session (live-confirmed: browser-level probes said 2/10).
    */
-  async hasMethod(client: CDPClient, method: string): Promise<boolean> {
+  async hasMethod(client: CDPClient, method: string, sessionId?: string): Promise<boolean> {
     const cached = this.cache.get(method);
     if (cached !== undefined) return cached;
     const pending = this.inFlight.get(method);
@@ -87,7 +92,7 @@ export class DomainCapabilities {
 
     const probe = (async () => {
       try {
-        await client.send(method, {});
+        await client.send(method, {}, sessionId);
         return true;
       } catch (err) {
         if (isMethodMissingError(err)) return false;
@@ -108,16 +113,16 @@ export class DomainCapabilities {
    * resolve through their canary; dotted "Domain.method" keys probe directly
    * (useful for version-gated methods like Emulation.setCPUPerformanceOverride).
    */
-  async has(client: CDPClient, key: string): Promise<boolean> {
-    if (key.includes('.')) return this.hasMethod(client, key);
+  async has(client: CDPClient, key: string, sessionId?: string): Promise<boolean> {
+    if (key.includes('.')) return this.hasMethod(client, key, sessionId);
     const canary = CANARIES[key as NotableDomain];
     if (!canary) return false; // no canary → unknown, treated as absent
-    return this.hasMethod(client, canary);
+    return this.hasMethod(client, canary, sessionId);
   }
 
   /** Feature-gate helper: throws an actionable error when absent. */
-  async require(client: CDPClient, key: string, minChrome?: string): Promise<void> {
-    if (await this.has(client, key)) return;
+  async require(client: CDPClient, key: string, minChrome?: string, sessionId?: string): Promise<void> {
+    if (await this.has(client, key, sessionId)) return;
     const versionNote = minChrome ? ` (requires Chrome ${minChrome}+)` : '';
     const err = new Error(
       `This browser does not support the CDP "${key}" feature${versionNote}. ` +
@@ -137,9 +142,9 @@ export class DomainCapabilities {
    * Summary for the `status` tool: how many of the notable domains are
    * present, and which are missing. Every entry is individually probed.
    */
-  async summarize(client: CDPClient): Promise<{ count: number; missing: string[] }> {
+  async summarize(client: CDPClient, sessionId?: string): Promise<{ count: number; missing: string[] }> {
     const results = await Promise.all(
-      NOTABLE_DOMAINS.map(async (d) => [d, await this.has(client, d)] as const),
+      NOTABLE_DOMAINS.map(async (d) => [d, await this.has(client, d, sessionId)] as const),
     );
     const missing = results.filter(([, present]) => !present).map(([d]) => d);
     return { count: results.length - missing.length, missing };
