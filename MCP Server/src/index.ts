@@ -540,7 +540,20 @@ registry.register(
           // Probe through a managed page session - the browser-level endpoint
           // only serves browser-wide domains, so page-scoped domains (Overlay,
           // FindInPage, Ads, ...) report "wasn't found" without one.
-          const firstSession = tabSessionService.entries().next().value?.[1] as string | undefined;
+          let firstSession = tabSessionService.entries().next().value?.[1] as string | undefined;
+          if (!firstSession) {
+            // No managed tab yet - attach to any open page tab just for probing
+            // (canaries are read-only or validation-rejected; attaching is inert)
+            try {
+              const { targetInfos } = (await cdpClient.send('Target.getTargets', {})) as {
+                targetInfos?: Array<{ targetId: string; type: string }>;
+              };
+              const pageTarget = targetInfos?.find((t) => t.type === 'page');
+              if (pageTarget) {
+                firstSession = (await tabSessionService.getSession(cdpClient, pageTarget.targetId)) as string;
+              }
+            } catch { /* fall back to browser-level probe */ }
+          }
           const { count, missing } = await capabilities.summarize(cdpClient, firstSession);
           lines.push(`CDP features (probed${firstSession ? ' on page session' : ' browser-level - no page session'}): ${count}/${count + missing.length}`);
           if (missing.length > 0) {
@@ -601,7 +614,9 @@ const server = new Server(
   { name: 'cdp-browser', version: VERSION },
   {
     capabilities: { tools: {} },
-    instructions: `CDP Browser MCP attaches your REAL running browser (cookies, logins, extensions stay). 14 tools: tabs, page, interact, form, execute, observe, emulate, storage, intercept, debug, browser, cleanup, ping, status. The browser connects automatically on the first browser-tool call - ping/status may say Connected: false before that; just call tabs.list or page.goto. Two connection modes: launch flag (--remote-debugging-port + explicit --user-data-dir) or the browser built-in chrome://inspect/#remote-debugging toggle (a permission dialog appears - click Allow).`,
+    instructions: `CDP Browser MCP attaches your REAL running browser (cookies, logins, extensions stay). 14 tools: tabs, page, interact, form, execute, observe, emulate, storage, intercept, debug, browser, cleanup, ping, status. The browser connects automatically on the first browser-tool call - ping/status may say Connected: false before that; just call any browser tool.
+
+CALLING CONVENTION (critical): every tool is ONE tool with an action enum parameter - there are NO per-action subtools. Call like tools["cdp-browser"].tabs({ action: "list" }), tools["cdp-browser"].page({ action: "goto", tabId, url }), tools["cdp-browser"].interact({ action: "click", tabId, uid }). WRONG: tabs.list(), tabs(), page.goto(url) - these tool names do not exist and fail schema validation. If unsure of an action or parameter, read the tool's description/enum first; tabs without action defaults to listing. Two connection modes: launch flag (--remote-debugging-port + explicit --user-data-dir) or the browser built-in chrome://inspect/#remote-debugging toggle (a permission dialog appears - click Allow).`,
   },
 );
 
