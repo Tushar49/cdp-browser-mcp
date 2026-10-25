@@ -18,16 +18,32 @@ async function handleConsole(
 ): Promise<ToolResult> {
   const sess = params._sessionId as string;
 
-  // Enable monitoring — the real server enables Log/Console domain on demand
+  // Runtime.enable is required for Runtime.consoleAPICalled / exceptionThrown
+  // events (console.log/error from the page). Log domain adds browser-generated
+  // entries (network errors, deprecations) that never pass through console.*.
+  await ctx.sendCommand('Runtime.enable', {}, sess).catch(() => {});
   await ctx.sendCommand('Log.enable', {}, sess);
 
-  // In the full server, console logs are stored in a per-session Map.
-  // Here we stub the CDP call structure — the actual log buffer is managed
-  // by the runtime integration layer.
-  const result = (await ctx.sendCommand('Log.getEntries', {}, sess).catch(() => ({ entries: [] }))) as Record<string, unknown>;
-  const entries = (result.entries ?? []) as Array<Record<string, unknown>>;
+  // Live in-memory store filled by the runtime event pipeline (index.ts)
+  const store = ctx.consoleLogs.get(sess) ?? [];
+  let logs: Array<Record<string, unknown>> = [...store];
 
-  let logs = entries;
+  // Merge browser Log-domain entries (deduped) for completeness
+  const browser = (await ctx.sendCommand('Log.getEntries', {}, sess).catch(() => ({ entries: [] }))) as {
+    entries?: Array<{ level?: string; text?: string; url?: string; timestamp?: number }>;
+  };
+  const seen = new Set(store.map((l) => `${l.level}|${l.text}|${l.url}`));
+  for (const e of browser.entries ?? []) {
+    const key = `${e.level ?? 'info'}|${e.text ?? ''}|${e.url ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    logs.push({
+      level: e.level ?? 'info',
+      text: e.text ?? '',
+      url: e.url ?? '',
+      ts: e.timestamp ? new Date(e.timestamp).getTime() : Date.now(),
+    });
+  }
   const level = params.level as string | undefined;
   if (level && level !== 'all') {
     logs = logs.filter(l => l.level === level);
