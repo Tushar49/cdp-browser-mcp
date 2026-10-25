@@ -6,7 +6,7 @@
  */
 
 import type { ToolRegistry } from './registry.js';
-import type { ServerContext, ToolResult, NetworkRequestEntry } from '../types.js';
+import type { ServerContext, ToolResult, NetworkRequestEntry, DownloadEntry } from '../types.js';
 import { defineTool } from './base-tool.js';
 import { ok, fail } from '../utils/helpers.js';
 
@@ -206,10 +206,11 @@ async function handleDownloads(
   await ctx.sendCommand('Page.enable', {}, sess);
 
   // Downloads are tracked in a per-session list by the runtime layer.
-  let dl: Array<Record<string, unknown>> = [];
+  const dlStore = ctx.downloads.get(sess) ?? [];
+  let dl: DownloadEntry[] = [...dlStore];
   const last = params.last as number | undefined;
   if (last) dl = dl.slice(-last);
-  // if (params.clear) clear download list
+  if (params.clear) ctx.downloads.delete(sess);
 
   if (!dl.length) return ok('No downloads tracked yet. Downloads are captured automatically when they occur.');
 
