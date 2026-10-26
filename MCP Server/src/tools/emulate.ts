@@ -164,7 +164,7 @@ async function handleEmulate(
       return fail(`Invalid devicePosture: "${posture}". Use: continuous, folded`);
     }
     try {
-      await ctx.sendCommand('Emulation.setDevicePostureOverride', { posture }, sess);
+      await ctx.sendCommand('Emulation.setDevicePostureOverride', { posture: { type: posture } }, sess);
       results.push(`Device posture: ${posture}`);
     } catch (err) {
       if (isMethodMissingError(err)) {
