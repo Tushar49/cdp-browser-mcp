@@ -212,6 +212,14 @@ export interface PendingDialog {
   ts: number;
 }
 
+/** Active find session state for a tab (page.find / find_next / find_stop). */
+export interface FindState {
+  text: string;
+  caseSensitive: boolean;
+  count: number;
+  ordinal: number;
+}
+
 /** Debugger paused state for a tab. */
 export interface PausedTabInfo {
   reason: string;
@@ -298,6 +306,8 @@ export interface ServerContext {
 
   /** Per-session pending dialog tracker (sessionId → dialogs). */
   pendingDialogs: Map<string, PendingDialog[]>;
+  /** Per-tab find session state (page.find). */
+  findState: Map<string, FindState>;
 
   /** Per-session file chooser handler callbacks (sessionId → handlers). */
   pendingFileChoosers: Map<string, FileChooserHandler[]>;

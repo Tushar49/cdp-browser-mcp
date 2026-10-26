@@ -73,6 +73,8 @@ interface PageArgs {
   state?: SelectorState;
   // Dialog
   accept?: boolean;
+  // Find
+  caseSensitive?: boolean;
   // PDF
   landscape?: boolean;
   scale?: number;
@@ -819,6 +821,83 @@ function countNodes(nodes: Array<{ children?: Array<unknown> }>): number {
 
 // ─── Action Dispatch Map ────────────────────────────────────────────
 
+// ─── Find in page (JS window.find - the native FindInPage CDP domain returns
+//     empty values (no match state), so JS is the only readable source) ──
+
+export async function handleFind(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
+  const sess = await getTabSession(ctx, args.tabId);
+  const text = (args.text ?? '').trim();
+  if (!text) return fail("Provide 'text' to search for.");
+  const caseSensitive = args.caseSensitive === true;
+  const result = (await ctx.sendCommand('Runtime.evaluate', {
+    expression: `(() => {
+      const text = ${JSON.stringify(text)};
+      const cs = ${caseSensitive};
+      if (!window.find) return { error: 'window.find is not supported in this browser' };
+      const sel = window.getSelection();
+      const countFromTop = () => {
+        sel.removeAllRanges();
+        window.scrollTo(0, 0);
+        let n = 0;
+        while (n < 1000 && window.find(text, cs, false, false)) n++;
+        return n;
+      };
+      const count = countFromTop();
+      sel.removeAllRanges();
+      window.scrollTo(0, 0);
+      let ordinal = 0;
+      if (count > 0 && window.find(text, cs, false, false)) ordinal = 1;
+      return { count, ordinal };
+    })()`,
+    returnByValue: true,
+  }, sess)) as { result: { value: { count: number; ordinal: number; error?: string } } };
+  const v = result.result?.value;
+  if (!v || v.error) return fail(v?.error ?? 'Find failed.');
+  if (v.count === 0) {
+    ctx.findState.delete(sess);
+    return ok(`No matches for "${text}".`);
+  }
+  ctx.findState.set(sess, { text, caseSensitive, count: v.count, ordinal: v.ordinal });
+  return ok(`Found ${v.count} match(es) for "${text}" - match ${v.ordinal}/${v.count} selected and highlighted.`);
+}
+
+export async function handleFindNext(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
+  const sess = await getTabSession(ctx, args.tabId);
+  const state = ctx.findState.get(sess);
+  if (!state) return fail('No active find session. Call action: "find" with text first.');
+  const result = (await ctx.sendCommand('Runtime.evaluate', {
+    expression: `(() => {
+      const text = ${JSON.stringify(state.text)};
+      const cs = ${state.caseSensitive};
+      const sel = window.getSelection();
+      if (window.find(text, cs, false, false)) return { wrapped: false };
+      sel.removeAllRanges();
+      window.scrollTo(0, 0);
+      if (window.find(text, cs, false, false)) return { wrapped: true };
+      return { lost: true };
+    })()`,
+    returnByValue: true,
+  }, sess)) as { result: { value: { wrapped?: boolean; lost?: boolean } } };
+  const v = result.result?.value;
+  if (v?.lost) {
+    ctx.findState.delete(sess);
+    return ok(`The page changed and "${state.text}" no longer matches. Run find again to restart.`);
+  }
+  state.ordinal = v?.wrapped ? 1 : (state.ordinal % state.count) + 1;
+  ctx.findState.set(sess, state);
+  return ok(`Match ${state.ordinal}/${state.count} for "${state.text}" selected${v?.wrapped ? " (wrapped to first)" : ""}.`);
+}
+
+export async function handleFindStop(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
+  const sess = await getTabSession(ctx, args.tabId);
+  const had = ctx.findState.delete(sess);
+  await ctx.sendCommand('Runtime.evaluate', {
+    expression: '(() => { const s = window.getSelection(); if (s) s.removeAllRanges(); return true; })()',
+    returnByValue: true,
+  }, sess).catch(() => {});
+  return ok(had ? 'Find session stopped, selection cleared.' : 'No active find session.');
+}
+
 const PAGE_ACTIONS: Record<string, (ctx: ServerContext, args: PageArgs) => Promise<ToolResult>> = {
   goto: handleGoto,
   back: handleBack,
@@ -835,6 +914,9 @@ const PAGE_ACTIONS: Record<string, (ctx: ServerContext, args: PageArgs) => Promi
   add_style: handleAddStyle,
   bypass_csp: handleBypassCsp,
   frames: handleFrames,
+  find: handleFind,
+  find_next: handleFindNext,
+  find_stop: handleFindStop,
 };
 
 // ─── Tool Registration ──────────────────────────────────────────────
@@ -875,9 +957,10 @@ const PAGE_INPUT_SCHEMA = {
   properties: {
     action: {
       type: 'string' as const,
-      enum: ['goto', 'back', 'forward', 'reload', 'snapshot', 'screenshot', 'content', 'set_content', 'wait', 'pdf', 'dialog', 'inject', 'add_style', 'bypass_csp', 'frames'] as const,
+      enum: ['goto', 'back', 'forward', 'reload', 'snapshot', 'screenshot', 'content', 'set_content', 'wait', 'pdf', 'dialog', 'inject', 'add_style', 'bypass_csp', 'frames', 'find', 'find_next', 'find_stop'] as const,
       description: 'Page action.',
     },
+    caseSensitive: { type: 'boolean' as const, description: 'Find action: match case (default: false).' },
     tabId: { type: 'string' as const, description: 'Tab ID.' },
     url: { type: 'string' as const, description: 'URL for goto.' },
     waitUntil: {
@@ -908,7 +991,7 @@ const PAGE_INPUT_SCHEMA = {
       enum: ['text', 'html', 'full'] as const,
       description: "Content format. 'text' (default) for visible text, 'html' for innerHTML, 'full' for complete document HTML with doctype.",
     },
-    text: { type: 'string' as const, description: 'Text to wait for / dialog prompt text.' },
+    text: { type: 'string' as const, description: "Text to wait for / dialog prompt text / find: text to search for." },
     textGone: { type: 'string' as const, description: 'Text to wait to disappear.' },
     timeout: {
       type: 'number' as const,

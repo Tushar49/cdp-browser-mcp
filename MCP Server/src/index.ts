@@ -478,6 +478,7 @@ const ctx: ServerContext = {
   networkReqs: new Map(),
   downloads: new Map(),
   pendingDialogs: new Map(),
+        findState: new Map(),
   pendingFileChoosers: new Map(),
   pausedTabs: new Map(),
   pendingFetchRequests: new Map(),
