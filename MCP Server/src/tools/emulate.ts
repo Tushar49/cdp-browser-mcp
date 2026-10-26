@@ -10,6 +10,7 @@ import type { ServerContext, ToolResult } from '../types.js';
 import { defineTool } from './base-tool.js';
 import { ok, fail } from '../utils/helpers.js';
 import { DEVICE_PRESETS, listDeviceNames } from './device-presets.js';
+import { isMethodMissingError } from '../connection/capabilities.js';
 const NL2 = String.fromCharCode(10);
 
 // ─── Network throttling presets (mirrors server.js) ─────────────────
@@ -42,6 +43,9 @@ async function handleEmulate(
     try { await ctx.sendCommand('Emulation.setLocaleOverride', { locale: '' }, sess); } catch { /* ok */ }
     try { await ctx.sendCommand('Emulation.setEmulatedVisionDeficiency', { type: 'none' }, sess); } catch { /* ok */ }
     try { await ctx.sendCommand('Emulation.clearIdleOverride', {}, sess); } catch { /* ok */ }
+    try { await ctx.sendCommand('Emulation.clearDevicePostureOverride', {}, sess); } catch { /* ok */ }
+    // No clear counterpart exists - 'unknown' tier restores the default
+    try { await ctx.sendCommand('Emulation.setCPUPerformanceOverride', { performanceTier: 'unknown' }, sess); } catch { /* ok */ }
     try { await ctx.sendCommand('Emulation.setUserAgentOverride', { userAgent: '' }, sess); } catch { /* ok */ }
     try { await ctx.sendCommand('Emulation.setAutoDarkModeOverride', {}, sess); } catch { /* ok */ }
     try {
@@ -153,6 +157,40 @@ async function handleEmulate(
     results.push(`CPU throttle: ${params.cpuThrottle}x`);
   }
 
+  // ── Device posture (5.1.0 B3, Chrome 153+) ──
+  if (params.devicePosture) {
+    const posture = params.devicePosture as string;
+    if (posture !== 'continuous' && posture !== 'folded') {
+      return fail(`Invalid devicePosture: "${posture}". Use: continuous, folded`);
+    }
+    try {
+      await ctx.sendCommand('Emulation.setDevicePostureOverride', { posture }, sess);
+      results.push(`Device posture: ${posture}`);
+    } catch (err) {
+      if (isMethodMissingError(err)) {
+        return fail('Emulation.setDevicePostureOverride is not supported on this browser (requires Chrome 153+). Update Chrome/Brave to use device posture emulation.');
+      }
+      throw err;
+    }
+  }
+
+  // ── CPU performance tier (5.1.0 B3, Chrome 153/154+) ──
+  if (params.cpuPerformance) {
+    const tier = params.cpuPerformance as string;
+    if (tier !== 'low' && tier !== 'mid' && tier !== 'high' && tier !== 'ultra') {
+      return fail(`Invalid cpuPerformance: "${tier}". Use: low, mid, high, ultra`);
+    }
+    try {
+      await ctx.sendCommand('Emulation.setCPUPerformanceOverride', { performanceTier: tier }, sess);
+      results.push(`CPU performance: ${tier} tier`);
+    } catch (err) {
+      if (isMethodMissingError(err)) {
+        return fail('Emulation.setCPUPerformanceOverride is not supported on this browser (requires Chrome 153/154+). Update Chrome/Brave to use CPU performance emulation.');
+      }
+      throw err;
+    }
+  }
+
   // ── Timezone ──
   if (params.timezone) {
     await ctx.sendCommand('Emulation.setTimezoneOverride', { timezoneId: params.timezone as string }, sess);
@@ -246,6 +284,8 @@ export function registerEmulateTools(
         '- visionDeficiency: Simulate vision impairment (optional: none|protanopia|deuteranopia|tritanopia|achromatopsia|blurredVision)',
         '- autoDarkMode: Force automatic dark mode (optional: boolean)',
         '- idle: Emulate idle/locked screen state (optional: active|locked)',
+        '- devicePosture: Foldable device posture override (optional: continuous|folded; Chrome 153+)',
+        '- cpuPerformance: CPU performance tier override (optional: low|mid|high|ultra; Chrome 153/154+)',
         '- networkCondition: Throttle network speed (optional: offline|slow3g|fast3g|slow4g|fast4g|none)',
         '- ignoreSSL: Bypass SSL certificate errors (optional: boolean)',
         '- blockUrls: Block requests matching URL patterns (optional: string array)',
@@ -284,6 +324,8 @@ export function registerEmulateTools(
           visionDeficiency: { type: 'string', enum: ['none', 'protanopia', 'deuteranopia', 'tritanopia', 'achromatopsia', 'blurredVision'], description: 'Vision deficiency simulation.' },
           autoDarkMode: { type: 'boolean', description: 'Auto dark mode.' },
           idle: { type: 'string', enum: ['active', 'locked'], description: 'Idle state.' },
+          devicePosture: { type: 'string', enum: ['continuous', 'folded'], description: 'Device posture override (Chrome 153+).' },
+          cpuPerformance: { type: 'string', enum: ['low', 'mid', 'high', 'ultra'], description: 'CPU performance tier override (Chrome 153/154+).' },
           networkCondition: { type: 'string', enum: ['offline', 'slow3g', 'fast3g', 'slow4g', 'fast4g', 'none'], description: 'Network throttle preset.' },
           ignoreSSL: { type: 'boolean', description: 'Ignore SSL certificate errors.' },
           blockUrls: { type: 'array', items: { type: 'string' }, description: 'URLs to block.' },
