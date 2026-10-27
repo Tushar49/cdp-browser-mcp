@@ -2,7 +2,7 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
-## [Unreleased]
+## [5.1.0] - 2026-10-27
 
 ### Added
 - agent-friendliness: the MCP handshake instructions now state the calling convention explicitly - every tool is ONE tool with an `action` enum parameter, with correct/wrong call examples (agents were guessing per-action subtools like `tabs.list()` and failing schema validation); `tabs` without an action now defaults to listing (the most common operation and a frequent retry after a schema error)
