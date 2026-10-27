@@ -338,7 +338,7 @@ When a connection fails, the server auto-detects the failure mode and prints the
 | `reload` | Reload page | `tabId` | `ignoreCache`, `waitUntil`, `timeout` |
 | `snapshot` | Accessibility tree with element refs | `tabId` | `interactive`, `search`, `maxLength` |
 | `screenshot` | Capture page or element as image (fullPage scrolls SPA containers to trigger lazy loading) | `tabId` | `fullPage`, `quality`, `uid`, `type`, `path` |
-| `content` | Extract text, HTML, or full document source | `tabId` | `uid`, `selector`, `format`(`text`\|`html`\|`full`) |
+| `content` | Extract text, HTML, or full document source | `tabId` | `uid`, `selector`, `format`(`text`\|`html`\|`full`\|`annotated` - experimental: `Page.getAnnotatedPageContent` dump; flat ASCII signal, no refs) |
 | `set_content` | Set page HTML content directly | `tabId`, `html` | — |
 | `wait` | Wait for condition or fixed delay | `tabId` | `text`, `textGone`, `selector`, `state`, `timeout`(ms) |
 | `pdf` | Export page as PDF | `tabId` | `landscape`, `scale`, `paperWidth`, `paperHeight`, `margin` |
