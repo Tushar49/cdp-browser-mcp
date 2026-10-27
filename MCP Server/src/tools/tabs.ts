@@ -596,13 +596,15 @@ export function registerTabsTools(
               'Lock tab to this session (default: true). Set false to allow shared access.',
           },
         },
-        required: ['action'],
+        required: [],
       },
       handler: async (
         _ctx: ServerContext,
         params: Record<string, unknown>,
       ): Promise<ToolResult> => {
-        const action = params.action as string;
+        // Calling with no args (e.g. tabs()) lists tabs - the most common
+        // operation, and a frequent agent retry after a schema error.
+        const action = (params.action as string) || 'list';
         const handler = ACTIONS[action];
         if (!handler) {
           return fail(

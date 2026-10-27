@@ -8,6 +8,7 @@
 
 import type { CDPClient } from './connection/cdp-client.js';
 import type { HealthMonitor } from './connection/health-monitor.js';
+import type { DomainCapabilities } from './connection/capabilities.js';
 import type { DomainManager } from './connection/domain-manager.js';
 import type { TabSessionService } from './connection/tab-session-service.js';
 import type { SessionManager } from './session/session-manager.js';
@@ -61,6 +62,9 @@ export interface ServerConfig {
 
   /** Process command-line scan on discovery failure (CDP_PROCESS_SCAN, default ON) */
   processScan: boolean;
+
+  /** Actionability gate before element interactions (CDP_AUTO_WAIT, default ON) */
+  autoWait: boolean;
 
   /** If true, expose 6 slim tools instead of 15 full tools (for small-context models) */
   slimMode: boolean;
@@ -208,6 +212,14 @@ export interface PendingDialog {
   ts: number;
 }
 
+/** Active find session state for a tab (page.find / find_next / find_stop). */
+export interface FindState {
+  text: string;
+  caseSensitive: boolean;
+  count: number;
+  ordinal: number;
+}
+
 /** Debugger paused state for a tab. */
 export interface PausedTabInfo {
   reason: string;
@@ -243,6 +255,9 @@ export type FileChooserHandler = (
  * state, and shared helpers — without any tool needing global imports.
  */
 export interface ServerContext {
+  /** CDP domain capability report (5.1.0 B1) — feature-detection backbone */
+  capabilities: DomainCapabilities;
+
   config: ServerConfig;
 
   /** The active CDP WebSocket client. */
@@ -291,6 +306,8 @@ export interface ServerContext {
 
   /** Per-session pending dialog tracker (sessionId → dialogs). */
   pendingDialogs: Map<string, PendingDialog[]>;
+  /** Per-tab find session state (page.find). */
+  findState: Map<string, FindState>;
 
   /** Per-session file chooser handler callbacks (sessionId → handlers). */
   pendingFileChoosers: Map<string, FileChooserHandler[]>;

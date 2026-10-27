@@ -6,7 +6,10 @@
  */
 
 import type { ToolRegistry } from './registry.js';
-import type { ServerContext, ToolResult } from '../types.js';
+import type { ServerContext, ToolResult, NetworkRequestEntry, DownloadEntry } from '../types.js';
+import { TempFileManager } from '../utils/temp-files.js';
+import { isMethodMissingError } from '../connection/capabilities.js';
+import { join } from 'path';
 import { defineTool } from './base-tool.js';
 import { ok, fail } from '../utils/helpers.js';
 
@@ -18,16 +21,32 @@ async function handleConsole(
 ): Promise<ToolResult> {
   const sess = params._sessionId as string;
 
-  // Enable monitoring — the real server enables Log/Console domain on demand
+  // Runtime.enable is required for Runtime.consoleAPICalled / exceptionThrown
+  // events (console.log/error from the page). Log domain adds browser-generated
+  // entries (network errors, deprecations) that never pass through console.*.
+  await ctx.sendCommand('Runtime.enable', {}, sess).catch(() => {});
   await ctx.sendCommand('Log.enable', {}, sess);
 
-  // In the full server, console logs are stored in a per-session Map.
-  // Here we stub the CDP call structure — the actual log buffer is managed
-  // by the runtime integration layer.
-  const result = (await ctx.sendCommand('Log.getEntries', {}, sess).catch(() => ({ entries: [] }))) as Record<string, unknown>;
-  const entries = (result.entries ?? []) as Array<Record<string, unknown>>;
+  // Live in-memory store filled by the runtime event pipeline (index.ts)
+  const store = ctx.consoleLogs.get(sess) ?? [];
+  let logs: Array<Record<string, unknown>> = [...store];
 
-  let logs = entries;
+  // Merge browser Log-domain entries (deduped) for completeness
+  const browser = (await ctx.sendCommand('Log.getEntries', {}, sess).catch(() => ({ entries: [] }))) as {
+    entries?: Array<{ level?: string; text?: string; url?: string; timestamp?: number }>;
+  };
+  const seen = new Set(store.map((l) => `${l.level}|${l.text}|${l.url}`));
+  for (const e of browser.entries ?? []) {
+    const key = `${e.level ?? 'info'}|${e.text ?? ''}|${e.url ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    logs.push({
+      level: e.level ?? 'info',
+      text: e.text ?? '',
+      url: e.url ?? '',
+      ts: e.timestamp ? new Date(e.timestamp).getTime() : Date.now(),
+    });
+  }
   const level = params.level as string | undefined;
   if (level && level !== 'all') {
     logs = logs.filter(l => l.level === level);
@@ -47,16 +66,29 @@ async function handleConsole(
   return ok(`${logs.length} console message(s):\n\n${lines.join('\n')}`);
 }
 
+/**
+ * B4: enable durable network messages so response bodies survive
+ * cross-process navigations. Silent-off when unsupported (pre-Chrome-153).
+ */
+function ensureNetworkResilience(ctx: ServerContext, sess: string): void {
+  ctx.sendCommand('Network.configureDurableMessages', {
+    maxTotalBufferSize: 104857600,
+    maxResourceBufferSize: 20971520,
+  }, sess).catch(() => { /* unsupported - silent */ });
+}
+
 async function handleNetwork(
   ctx: ServerContext,
   params: Record<string, unknown>,
 ): Promise<ToolResult> {
   const sess = params._sessionId as string;
   await ctx.sendCommand('Network.enable', {}, sess);
+  ensureNetworkResilience(ctx, sess);
 
-  // Network requests are tracked in an in-memory Map by the runtime layer.
-  // Stub: return structure from the runtime integration.
-  let reqs: Array<Record<string, unknown>> = [];
+  // Live in-memory store filled by the runtime event pipeline
+  // (Network.requestWillBeSent / responseReceived / loadingFinished in index.ts)
+  const reqMap = ctx.networkReqs.get(sess);
+  let reqs: NetworkRequestEntry[] = reqMap ? [...reqMap.values()] : [];
 
   const filter = params.filter as string | undefined;
   if (filter) {
@@ -70,18 +102,19 @@ async function handleNetwork(
   }
   const last = params.last as number | undefined;
   if (last) reqs = reqs.slice(-last);
-  if (params.clear) {
-    // clear would reset the in-memory request map
-  }
-
-  if (!reqs.length) return ok('No network requests captured yet. Navigate or interact to start capturing.');
-
   const lines = reqs.map(r => {
     const status = (r.status as number | string) || 'pending';
     const size = r.size != null ? `${((r.size as number) / 1024).toFixed(1)}KB` : '?';
     return `[${r.id}] ${r.method} ${status} ${size} ${r.type} ${(r.url as string).substring(0, 120)}`;
   });
-  return ok(`${reqs.length} request(s):\n\n${lines.join('\n')}`);
+  const output = reqs.length
+    ? `${reqs.length} request(s):\n\n${lines.join('\n')}`
+    : 'No network requests captured yet. Navigate or interact to start capturing.';
+
+  // clear:true resets the in-memory store after the listing is built
+  if (params.clear) reqMap?.clear();
+
+  return ok(output);
 }
 
 async function handleRequest(
@@ -90,6 +123,7 @@ async function handleRequest(
 ): Promise<ToolResult> {
   const sess = params._sessionId as string;
   await ctx.sendCommand('Network.enable', {}, sess);
+  ensureNetworkResilience(ctx, sess);
 
   // Parity with Playwright MCP browser_network_requests — single-call equivalent.
   // Allow `urlFilter` (substring) as an alternative to `requestId`. We resolve the
@@ -126,14 +160,46 @@ async function handleRequest(
   const result: Record<string, unknown> = { requestId };
   if (resolvedFrom !== null) result.matchedFrom = resolvedFrom;
 
-  // Get response body
+  // Get response body (B4: large bodies stream to a temp file instead of
+  // inlining; unretained bodies retry via Network.streamResourceContent)
+  const INLINE_BODY_CAP = 60_000;
+  const PREVIEW = 2_000;
   try {
-    const resp = (await ctx.sendCommand('Network.getResponseBody', { requestId }, sess)) as Record<string, unknown>;
-    if (resp.base64Encoded) {
-      const decoded = Buffer.from(resp.body as string, 'base64');
-      result.responseBody = decoded.toString('utf8');
-    } else {
-      result.responseBody = resp.body;
+    let body: string | null = null;
+    let base64 = false;
+    try {
+      const resp = (await ctx.sendCommand('Network.getResponseBody', { requestId }, sess)) as Record<string, unknown>;
+      body = resp.body as string;
+      base64 = !!resp.base64Encoded;
+    } catch {
+      // Body not retained (e.g. after cross-process navigation) - stream it
+      // (works when durable messages are configured)
+      try {
+        const streamed = (await ctx.sendCommand('Network.streamResourceContent', { requestId }, sess)) as { bufferedData?: string };
+        body = streamed.bufferedData ?? null;
+        base64 = true;
+        if (body !== null) result.bodySource = 'stream';
+      } catch (e2: unknown) {
+        result.responseBody = `[Not available: ${(e2 as Error).message}]`;
+      }
+    }
+    if (body !== null && body !== undefined) {
+      const decoded = base64 ? Buffer.from(body, 'base64') : Buffer.from(body, 'utf8');
+      const text = decoded.toString('utf8');
+      if (text.length > INLINE_BODY_CAP) {
+        const tempDir = ctx.config.tempDir || join(process.cwd(), '.temp');
+        const manager = new TempFileManager({
+          tempDir,
+          maxTempFiles: ctx.config.maxTempFiles,
+          maxTempAgeMs: ctx.config.maxTempAgeMs,
+        });
+        const file = manager.write(`response-${Date.now()}.txt`, decoded, 'binary');
+        result.responseBodyFile = file;
+        result.responseBodyPreview = text.slice(0, PREVIEW);
+        result.responseBodySize = decoded.length;
+      } else {
+        result.responseBody = text;
+      }
     }
   } catch (e: unknown) {
     result.responseBody = `[Not available: ${(e as Error).message}]`;
@@ -180,6 +246,107 @@ async function handlePerformance(
   return ok(`Performance Metrics:\n\n${lines.join('\n')}`);
 }
 
+/** Bounded wait - never rejects; { ok: false } on timeout or error. */
+function raceBounded<T>(p: Promise<T>, ms: number): Promise<{ ok: boolean; value?: T }> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve({ ok: false }), ms);
+    p.then((v) => { clearTimeout(t); resolve({ ok: true, value: v }); }).catch(() => { clearTimeout(t); resolve({ ok: false }); });
+  });
+}
+
+/**
+ * B5: DOM/memory counters. Memory.getDOMCounters + a forced GC sweep
+ * (prepareForLeakDetection) when the browser answers; falls back to the
+ * Performance.getMetrics counters (Documents/Nodes/JSEventListeners) when
+ * the Memory domain is missing or unresponsive. Every Memory call is
+ * bounded so an unresponsive domain degrades in seconds instead of
+ * deadlocking the tool call.
+ */
+async function handleMemory(
+  ctx: ServerContext,
+  params: Record<string, unknown>,
+): Promise<ToolResult> {
+  const sess = params._sessionId as string;
+  const BOUND_MS = Math.max(1, (params._boundMs as number) || 5_000);
+  const skipped: string[] = [];
+
+  try {
+    const enable = await raceBounded(ctx.sendCommand('Memory.enable', {}, sess), BOUND_MS);
+    if (!enable.ok) skipped.push('Memory.enable (unsupported or timed out)');
+
+    const readMem = async (): Promise<Record<string, number> | null> => {
+      const r = await raceBounded(ctx.sendCommand('Memory.getDOMCounters', {}, sess), BOUND_MS);
+      if (!r.ok || !r.value) return null;
+      const v = r.value as Record<string, unknown>;
+      return {
+        documents: v.documents as number,
+        nodes: v.nodes as number,
+        jsEventListeners: v.jsEventListeners as number,
+      };
+    };
+
+    let counters: Record<string, number> | null = await readMem();
+    const result: Record<string, unknown> = {};
+
+    if (counters) {
+      result.source = 'Memory.getDOMCounters';
+      const sweep = await raceBounded(ctx.sendCommand('Memory.prepareForLeakDetection', {}, sess), BOUND_MS);
+      if (!sweep.ok) skipped.push('prepareForLeakDetection (unsupported or timed out)');
+      const after = await readMem();
+      if (after) {
+        result.gc = {
+          before: counters,
+          after,
+          delta: {
+            documents: (after.documents ?? 0) - (counters.documents ?? 0),
+            nodes: (after.nodes ?? 0) - (counters.nodes ?? 0),
+            jsEventListeners: (after.jsEventListeners ?? 0) - (counters.jsEventListeners ?? 0),
+          },
+        };
+        counters = after;
+      }
+      const leak = await raceBounded(ctx.sendCommand('Memory.getDOMCountersForLeakDetection', {}, sess), BOUND_MS);
+      if (leak.ok && leak.value) {
+        const cs = (leak.value as { counters?: Array<{ name: string; count: number }> }).counters;
+        if (Array.isArray(cs) && cs.length > 0) result.leakDetectors = cs.slice(0, 50);
+      } else {
+        skipped.push('getDOMCountersForLeakDetection');
+      }
+    } else {
+      // Memory domain unresponsive - fall back to Performance metrics counters
+      skipped.push('Memory.getDOMCounters (unsupported or unresponsive)');
+      try {
+        await ctx.sendCommand('Performance.enable', {}, sess);
+      } catch { /* best-effort — getMetrics may still work */ }
+      try {
+        const perf = (await ctx.sendCommand('Performance.getMetrics', {}, sess)) as Record<string, unknown>;
+        const m = (perf.metrics ?? []) as Array<{ name: string; value: number }>;
+        const pick = (n: string): number | null => m.find(x => x.name === n)?.value ?? null;
+        counters = {
+          documents: pick('Documents'),
+          nodes: pick('Nodes'),
+          jsEventListeners: pick('JSEventListeners'),
+        } as Record<string, number>;
+        result.source = 'Performance.getMetrics (Memory domain unresponsive - no GC sweep)';
+      } catch {
+        counters = null;
+        skipped.push('Performance.getMetrics fallback');
+      }
+    }
+
+    if (counters) result.counters = counters;
+    if (skipped.length > 0) result.skipped = skipped;
+    if (!counters) {
+      return fail(`Memory counters unavailable on this browser (Memory and Performance domains both unresponsive). Tried: ${skipped.join('; ')}`);
+    }
+    return ok(result);
+  } catch (err: unknown) {
+    if (isMethodMissingError(err)) {
+      return fail('Memory domain is not supported on this browser. DOM/memory counters require a Chromium-based browser with the Memory CDP domain.');
+    }
+    throw err;
+  }
+}
 async function handleDownloads(
   ctx: ServerContext,
   params: Record<string, unknown>,
@@ -188,10 +355,11 @@ async function handleDownloads(
   await ctx.sendCommand('Page.enable', {}, sess);
 
   // Downloads are tracked in a per-session list by the runtime layer.
-  let dl: Array<Record<string, unknown>> = [];
+  const dlStore = ctx.downloads.get(sess) ?? [];
+  let dl: DownloadEntry[] = [...dlStore];
   const last = params.last as number | undefined;
   if (last) dl = dl.slice(-last);
-  // if (params.clear) clear download list
+  if (params.clear) ctx.downloads.delete(sess);
 
   if (!dl.length) return ok('No downloads tracked yet. Downloads are captured automatically when they occur.');
 
@@ -276,6 +444,7 @@ export function registerObserveTools(
         '- network: List captured network requests with URLs, methods, status codes, and timing (requires: tabId; optional: filter — URL substring, types — resource type filter array, last, clear)',
         '- request: Get the full request and response body for a specific network request (requires: tabId; provide either requestId — from network listing — or urlFilter — substring of the URL; urlFilter resolves to the most recent matching request)',
         '- performance: Collect page performance metrics including DOM size, JS heap, layout counts, and paint timing (requires: tabId)',
+        '- memory: DOM/JS memory counters (documents, nodes, JS event listeners) before/after a forced GC sweep via Memory.prepareForLeakDetection, plus leak-detection counters when supported (requires: tabId)',
         '- downloads: List tracked file downloads with progress info (requires: tabId; optional: last, clear)',
         '- har: Export captured network requests as HAR 1.2 JSON (requires: tabId)',
         '',
@@ -289,7 +458,7 @@ export function registerObserveTools(
       inputSchema: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['console', 'network', 'request', 'performance', 'downloads', 'har'], description: 'Observe action.' },
+          action: { type: 'string', enum: ['console', 'network', 'request', 'performance', 'memory', 'downloads', 'har'], description: 'Observe action.' },
           tabId: { type: 'string', description: 'Tab ID.' },
           level: { type: 'string', enum: ['all', 'error', 'warning', 'log', 'info', 'debug'], description: 'Console level filter.' },
           filter: { type: 'string', description: 'Network URL filter.' },
@@ -311,9 +480,10 @@ export function registerObserveTools(
           case 'network':     return handleNetwork(ctx, params);
           case 'request':     return handleRequest(ctx, params);
           case 'performance': return handlePerformance(ctx, params);
+          case 'memory':      return handleMemory(ctx, params);
           case 'downloads':   return handleDownloads(ctx, params);
           case 'har':         return handleHar(ctx, params);
-          default:            return fail(`Unknown observe action: "${action}". Use: console, network, request, performance, downloads, har`);
+          default:            return fail(`Unknown observe action: "${action}". Use: console, network, request, performance, memory, downloads, har`);
         }
       },
     }),

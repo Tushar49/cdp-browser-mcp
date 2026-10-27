@@ -13,6 +13,20 @@ import { ok, fail, randomDelay, generateBezierPath } from '../utils/helpers.js';
 import { Errors, wrapError } from '../utils/error-handler.js';
 import { slimify } from './slim-mode.js';
 import {
+  runActionabilityGate,
+  scrollIntoViewIfNeeded,
+  retryWithLadder,
+  type ActionabilityState,
+  type GateTarget,
+} from '../utils/actionability.js';
+
+/** Adapt ctx.sendCommand to the gate's SendFn signature. */
+type SendFnAlias = (
+  method: string,
+  params?: Record<string, unknown>,
+  sessionId?: string,
+) => Promise<unknown>;
+import {
   sleep,
   waitForSelector,
   waitForText,
@@ -156,6 +170,11 @@ interface InteractArgs {
   amount?: number;
   x?: number;
   y?: number;
+  // wheel
+  deltaX?: number;
+  deltaY?: number;
+  /** Skip actionability checks (escape hatch, default false — gate runs when CDP_AUTO_WAIT is on). */
+  force?: boolean;
   // upload
   files?: string[];
   // check
@@ -186,6 +205,8 @@ interface ResolvedElement {
   h: number;
   tag: string;
   label: string;
+  /** Present on the uid path — used by the actionability gate (5.1.0). */
+  objectId?: string;
 }
 
 /** Resolved element with objectId for JS calls. */
@@ -220,7 +241,12 @@ async function handleClick(ctx: ServerContext, args: InteractArgs): Promise<Tool
   const retryTimeout = args.timeout || ctx.config.actionTimeout;
 
   const el = await withRetry(
-    () => resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId),
+    () =>
+      resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId, {
+        states: ['visible', 'stable', 'enabled'],
+        hitCheck: true,
+        force: args.force,
+      }),
     retryTimeout,
   );
 
@@ -326,7 +352,10 @@ async function handleType(ctx: ServerContext, args: InteractArgs): Promise<ToolR
 
   // Resolve element and focus it
   const { objectId, resolvedSession } = await withRetry(async () => {
-    await resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId);
+      await resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId, {
+        states: ['visible', 'enabled', 'editable'],
+        force: args.force,
+      });
     return resolveElementObjectId(ctx, sess, args.uid, args.selector, args.tabId);
   }, retryTimeout);
 
@@ -500,7 +529,10 @@ async function handleSelect(ctx: ServerContext, args: InteractArgs): Promise<Too
   const retryTimeout = args.timeout || ctx.config.actionTimeout;
 
   const { objectId, resolvedSession } = await withRetry(async () => {
-    await resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId);
+      await resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId, {
+        states: ['visible', 'enabled', 'editable'],
+        force: args.force,
+      });
     return resolveElementObjectId(ctx, sess, args.uid, args.selector, args.tabId);
   }, retryTimeout);
 
@@ -696,6 +728,125 @@ async function handleScroll(ctx: ServerContext, args: InteractArgs): Promise<Too
   }
 
   return ok(slimify(`Scrolled ${dir} by ${amount}px`, 'Scrolled'));
+}
+
+// ─── Coordinate-based mouse actions (5.1.0 A2) ──────────────────────
+
+async function handleMouseMove(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
+  if (args.x === undefined || args.y === undefined) {
+    return fail('mouse_move requires x and y (viewport coordinates).');
+  }
+  const sess = await getTabSession(ctx, args.tabId);
+  const mods = modifierFlags(args.modifiers);
+
+  if (args.humanMode) {
+    const path = generateBezierPath({ x: 0, y: 0 }, { x: args.x, y: args.y });
+    for (let i = 0; i < path.length; i++) {
+      await ctx.sendCommand('Input.dispatchMouseEvent', {
+        type: 'mouseMoved', x: path[i].x, y: path[i].y, modifiers: mods,
+      }, sess);
+      await sleep(i / path.length > 0.7 ? 15 + Math.random() * 20 : 5 + Math.random() * 10);
+    }
+  } else {
+    await ctx.sendCommand('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x: args.x, y: args.y, modifiers: mods,
+    }, sess);
+  }
+  return ok(slimify(`Mouse moved to (${args.x}, ${args.y})`, 'Mouse moved'));
+}
+
+async function handleMouseDown(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
+  if (args.x === undefined || args.y === undefined) {
+    return fail('mouse_down requires x and y (viewport coordinates).');
+  }
+  const sess = await getTabSession(ctx, args.tabId);
+  const button = args.button || 'left';
+  const buttonsMap: Record<string, number> = { left: 1, right: 2, middle: 4 };
+  await ctx.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: args.x, y: args.y, button,
+    clickCount: args.clickCount || 1, buttons: buttonsMap[button] || 1,
+    modifiers: modifierFlags(args.modifiers),
+  }, sess);
+  return ok(slimify(`Mouse ${button} pressed at (${args.x}, ${args.y})`, 'Pressed'));
+}
+
+async function handleMouseUp(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
+  if (args.x === undefined || args.y === undefined) {
+    return fail('mouse_up requires x and y (viewport coordinates).');
+  }
+  const sess = await getTabSession(ctx, args.tabId);
+  const button = args.button || 'left';
+  await ctx.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: args.x, y: args.y, button,
+    clickCount: args.clickCount || 1,
+    modifiers: modifierFlags(args.modifiers),
+  }, sess);
+  return ok(slimify(`Mouse ${button} released at (${args.x}, ${args.y})`, 'Released'));
+}
+
+async function handleClickXY(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
+  if (args.x === undefined || args.y === undefined) {
+    return fail('click_xy requires x and y (viewport coordinates).');
+  }
+  const sess = await getTabSession(ctx, args.tabId);
+  const button = args.button || 'left';
+  const clicks = args.clickCount || 1;
+  const buttonsMap: Record<string, number> = { left: 1, right: 2, middle: 4 };
+  const mods = modifierFlags(args.modifiers);
+
+  if (args.humanMode) {
+    const path = generateBezierPath({ x: 0, y: 0 }, { x: args.x, y: args.y });
+    for (let i = 0; i < path.length; i++) {
+      await ctx.sendCommand('Input.dispatchMouseEvent', {
+        type: 'mouseMoved', x: path[i].x, y: path[i].y, modifiers: mods,
+      }, sess);
+      await sleep(i / path.length > 0.7 ? 15 + Math.random() * 20 : 5 + Math.random() * 10);
+    }
+    await sleep(30 + Math.random() * 50);
+  } else {
+    await ctx.sendCommand('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x: args.x, y: args.y, modifiers: mods,
+    }, sess);
+    await sleep(50);
+  }
+
+  await ctx.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: args.x, y: args.y, button,
+    clickCount: clicks, buttons: buttonsMap[button] || 1, modifiers: mods,
+  }, sess);
+  await ctx.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: args.x, y: args.y, button, clickCount: clicks, modifiers: mods,
+  }, sess);
+
+  const netEvents = await waitForNetworkSettle(ctx, sess, 2000);
+  const netSuffix = netEvents.length > 0 ? `\nNetwork: ${netEvents.length} request(s) completed` : '';
+  return ok(slimify(`Clicked at (${args.x}, ${args.y})${netSuffix}`, 'Clicked'));
+}
+
+async function handleWheel(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
+  const deltaX = args.deltaX ?? 0;
+  const deltaY = args.deltaY ?? 0;
+  if (deltaX === 0 && deltaY === 0) {
+    return fail('wheel requires deltaX and/or deltaY (pixels; positive = down/right).');
+  }
+  const sess = await getTabSession(ctx, args.tabId);
+  const x = args.x ?? 0;
+  const y = args.y ?? 0;
+  try {
+    // Short timeout: some Chromium builds (Brave 153 observed) never ack
+    // mouseWheel dispatches - fall back to JS scrolling instead of hanging.
+    await ctx.cdpClient.send('Input.dispatchMouseEvent', {
+      type: 'mouseWheel', x, y, deltaX, deltaY,
+      modifiers: modifierFlags(args.modifiers),
+    }, sess, 3000);
+    return ok(slimify(`Wheeled (${deltaX}, ${deltaY}) at (${x}, ${y})`, 'Wheeled'));
+  } catch {
+    // JS fallback: same viewport scroll result for page-level content
+    await ctx.sendCommand('Runtime.evaluate', {
+      expression: `window.scrollBy({ left: ${deltaX}, top: ${deltaY}, behavior: 'instant' })`,
+    }, sess);
+    return ok(slimify(`Scrolled (${deltaX}, ${deltaY}) via JS fallback - CDP wheel not acked by this browser`, 'Scrolled'));
+  }
 }
 
 async function handleUpload(ctx: ServerContext, args: InteractArgs): Promise<ToolResult> {
@@ -895,7 +1046,10 @@ async function handleCheck(ctx: ServerContext, args: InteractArgs): Promise<Tool
   const retryTimeout = args.timeout || ctx.config.actionTimeout;
 
   const { objectId, resolvedSession } = await withRetry(async () => {
-    await resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId);
+      await resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId, {
+        states: ['visible', 'enabled'],
+        force: args.force,
+      });
     return resolveElementObjectId(ctx, sess, args.uid, args.selector, args.tabId);
   }, retryTimeout);
 
@@ -920,7 +1074,12 @@ async function handleTap(ctx: ServerContext, args: InteractArgs): Promise<ToolRe
   const sess = await getTabSession(ctx, args.tabId);
   const retryTimeout = args.timeout || ctx.config.actionTimeout;
   const el = await withRetry(
-    () => resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId),
+    () =>
+      resolveAndCheck(ctx, sess, args.uid, args.selector, args.tabId, {
+        states: ['visible', 'stable', 'enabled'],
+        hitCheck: true,
+        force: args.force,
+      }),
     retryTimeout,
   );
 
@@ -975,18 +1134,32 @@ async function resolveElement(
       throw Errors.staleRef(uid);
     }
 
+    // Route to the OOP-frame child session when this uid lives in one (5.1.0 A5)
+    const elemSess = ctx.tabSessions.getRefSession(sess, uid) ?? sess;
     // Resolve backendNodeId to objectId for metadata extraction
     const { object } = await ctx.sendCommand('DOM.resolveNode', {
       backendNodeId,
-    }, sess) as { object: { objectId?: string } };
+    }, elemSess) as { object: { objectId?: string } };
     if (!object?.objectId) throw Errors.staleRef(uid);
 
     // Get bounding rect and element info via JS
     const info = await ctx.sendCommand('Runtime.callFunctionOn', {
       functionDeclaration: `function() {
         const r = this.getBoundingClientRect();
+        // Translate frame-viewport coords to main-page viewport coords:
+        // getBoundingClientRect inside a same-origin iframe is relative to
+        // that iframe's viewport. Walk window.frameElement up to the main
+        // frame accumulating each iframe element's rect origin (A5b).
+        let fx = 0, fy = 0, w = window;
+        try {
+          while (w.frameElement) {
+            const fr = w.frameElement.getBoundingClientRect();
+            fx += fr.left; fy += fr.top;
+            w = w.parent;
+          }
+        } catch (e) { /* cross-origin boundary — offsets stay 0 */ }
         return {
-          x: r.x + r.width / 2, y: r.y + r.height / 2,
+          x: r.x + r.width / 2 + fx, y: r.y + r.height / 2 + fy,
           w: r.width, h: r.height,
           tag: this.tagName.toLowerCase(),
           label: (this.getAttribute('aria-label') || this.textContent || '').trim().substring(0, 60),
@@ -994,10 +1167,10 @@ async function resolveElement(
       }`,
       objectId: object.objectId,
       returnByValue: true,
-    }, sess) as { result: { value: ResolvedElement | null } };
+    }, elemSess) as { result: { value: ResolvedElement | null } };
 
     if (!info.result.value) throw Errors.staleRef(uid);
-    return info.result.value;
+    return { ...info.result.value, objectId: object.objectId };
   }
 
   if (!selector) throw new Error('Provide uid or selector to identify the element.');
@@ -1024,17 +1197,43 @@ async function resolveElement(
 /**
  * Resolve + check actionability (visible, non-zero size, enabled).
  */
+/** Per-action actionability gate spec (5.1.0 A1). */
+interface GateSpec {
+  states: ActionabilityState[];
+  /** Run document.elementFromPoint hit-target verification (pointer actions). */
+  hitCheck?: boolean;
+  /** Skip the gate entirely (escape hatch). */
+  force?: boolean;
+}
+
 async function resolveAndCheck(
   ctx: ServerContext,
   sess: string,
   uid?: number,
   selector?: string,
   tabId?: string,
+  gate?: GateSpec,
 ): Promise<ResolvedElement> {
   // resolveElement already checks existence; add actionability checks
   const el = await resolveElement(ctx, sess, uid, selector, tabId);
   if (el.w === 0 && el.h === 0) {
     throw Errors.elementNotInteractable(uid ?? 0, 'Element has zero size — it may be hidden or collapsed.');
+  }
+  const elemSess = uid !== undefined ? (ctx.tabSessions.getRefSession(sess, uid) ?? sess) : sess;
+  const active = gate && ctx.config.autoWait && !gate.force;
+  if (active && gate) {
+    const target: GateTarget = el.objectId
+      ? { objectId: el.objectId }
+      : { selector: selector ?? '' };
+    if (gate.hitCheck) {
+      // Scroll first so the hit-target check sees the element in-viewport
+      await scrollIntoViewIfNeeded(ctx.sendCommand as unknown as SendFnAlias, elemSess, target);
+    }
+    await runActionabilityGate(ctx.sendCommand as unknown as SendFnAlias, elemSess, target, {
+      states: gate.states,
+      hitCheck: gate.hitCheck,
+      timeoutMs: ctx.config.actionTimeout,
+    });
   }
   return el;
 }
@@ -1060,12 +1259,13 @@ async function resolveElementObjectId(
       throw Errors.staleRef(uid);
     }
 
+    const elemSess = ctx.tabSessions.getRefSession(sess, uid) ?? sess;
     const { object } = await ctx.sendCommand('DOM.resolveNode', {
       backendNodeId,
-    }, sess) as { object: { objectId?: string } };
+    }, elemSess) as { object: { objectId?: string } };
     if (!object?.objectId) throw Errors.staleRef(uid);
 
-    return { objectId: object.objectId, resolvedSession: sess };
+    return { objectId: object.objectId, resolvedSession: elemSess };
   }
 
   if (!selector) throw new Error('Provide uid or selector to identify the element.');
@@ -1084,18 +1284,9 @@ async function resolveElementObjectId(
  * Retry a function until it succeeds or timeout expires.
  * Mirrors the withRetry pattern from server.js.
  */
+/** Retry helper — delegates to the consolidated ladder implementation (5.1.0 A1). */
 async function withRetry<T>(fn: () => Promise<T>, timeout: number): Promise<T> {
-  const start = Date.now();
-  let lastError: unknown;
-  while (Date.now() - start < timeout) {
-    try {
-      return await fn();
-    } catch (e) {
-      lastError = e;
-      await sleep(300);
-    }
-  }
-  throw lastError;
+  return retryWithLadder(fn, { timeoutMs: timeout });
 }
 
 /**
@@ -1245,6 +1436,11 @@ const INTERACT_ACTIONS: Record<string, (ctx: ServerContext, args: InteractArgs) 
   press: handlePress,
   drag: handleDrag,
   scroll: handleScroll,
+  mouse_move: handleMouseMove,
+  mouse_down: handleMouseDown,
+  mouse_up: handleMouseUp,
+  click_xy: handleClickXY,
+  wheel: handleWheel,
   upload: handleUpload,
   focus: handleFocus,
   check: handleCheck,
@@ -1254,11 +1450,16 @@ const INTERACT_ACTIONS: Record<string, (ctx: ServerContext, args: InteractArgs) 
 // ─── Tool Registration ──────────────────────────────────────────────
 
 const INTERACT_DESCRIPTION = [
-  'Element interaction — click, type, fill, select, press, drag, scroll, upload, focus, check, tap.',
+  'Element interaction — click, type, fill, select, press, drag, scroll, upload, focus, check, tap, plus coordinate-based mouse (mouse_move, mouse_down, mouse_up, click_xy, wheel).',
   'Always take a snapshot first to get uid refs.',
   '',
   'Actions:',
   '- click: Click element (tabId, uid/selector; optional: button, clickCount, jsClick, modifiers, humanMode, waitFor — wait-for-element after click in same call)',
+  '- mouse_move: Move mouse to viewport coordinates (tabId, x, y; optional: humanMode — bezier mouse path)',
+  '- mouse_down: Press mouse button at viewport coordinates (tabId, x, y; optional: button, clickCount, modifiers) — press-hold workflows',
+  '- mouse_up: Release mouse button at viewport coordinates (tabId, x, y; optional: button, clickCount, modifiers)',
+  '- click_xy: Click at viewport coordinates without an element (tabId, x, y; optional: button, clickCount, modifiers, humanMode) — canvas/map/virtualized UIs; hit-target is the caller\u2019s responsibility',
+  '- wheel: Dispatch mouse wheel (tabId, deltaX and/or deltaY, optional: x, y, modifiers) — positive deltaY scrolls down',
   '- hover: Hover element (tabId, uid/selector)',
   '- type: Type text (tabId, text, uid/selector; optional: clear, submit, delay, charDelay, wordDelay, typoRate)',
   '- fill: Fill multiple fields [{uid, value, type}] (tabId, fields)',
@@ -1279,7 +1480,7 @@ const INTERACT_INPUT_SCHEMA = {
   properties: {
     action: {
       type: 'string' as const,
-      enum: ['click', 'hover', 'type', 'fill', 'select', 'press', 'drag', 'scroll', 'upload', 'focus', 'check', 'tap'] as const,
+      enum: ['click', 'hover', 'type', 'fill', 'select', 'press', 'drag', 'scroll', 'mouse_move', 'mouse_down', 'mouse_up', 'click_xy', 'wheel', 'upload', 'focus', 'check', 'tap'] as const,
       description: 'Interaction action.',
     },
     tabId: { type: 'string' as const, description: 'Tab ID.' },
@@ -1341,8 +1542,10 @@ const INTERACT_INPUT_SCHEMA = {
       description: 'Scroll direction.',
     },
     amount: { type: 'number' as const, description: 'Scroll pixels (default: 400).' },
-    x: { type: 'number' as const, description: 'Scroll-to X position.' },
-    y: { type: 'number' as const, description: 'Scroll-to Y position.' },
+    x: { type: 'number' as const, description: 'Viewport X coordinate (scroll target / mouse actions).' },
+    y: { type: 'number' as const, description: 'Viewport Y coordinate (scroll target / mouse actions).' },
+    deltaX: { type: 'number' as const, description: 'wheel action: horizontal wheel delta in pixels (positive = right).' },
+    deltaY: { type: 'number' as const, description: 'wheel action: vertical wheel delta in pixels (positive = down).' },
     files: {
       type: 'array' as const,
       items: { type: 'string' as const },

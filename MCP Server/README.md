@@ -64,6 +64,20 @@ command lines are never logged — disable with `CDP_PROCESS_SCAN=false`), and
 can connect via the `chrome://inspect` toggle by reading `DevToolsActivePort`.
 `ping`/`status` report the connection mode (`legacy` | `approval`).
 
+## Browser compatibility
+
+| Browser | Flag mode | Toggle (approval) | Process scan | Notes |
+|---------|-----------|-------------------|--------------|-------|
+| Chrome 136+ | ✅ requires non-default `--user-data-dir` | ✅ Chrome 144+ | ✅ | default-profile restriction since Chrome 136 |
+| Brave | ✅ | ✅ (verified on 153) | ✅ (verified on 153) | portapps wrappers: launch inner `app\brave.exe`, not wrapper shortcut |
+| Edge | ✅ | ✅ Chrome 144+ | ✅ | same Chromium behavior |
+| Chromium | ✅ | ✅ Chrome 144+ | ✅ | restriction is Chrome-branding-gated |
+| Vivaldi | ✅ | ✅ Chrome 144+ | ✅ | discovery path added in 5.0.3 |
+| Opera | ✅ | ✅ Chrome 144+ | ✅ | discovery path added in 5.0.3 |
+| Chrome for Testing | ✅ no restriction | — | ✅ | recommended automated/CI setups |
+
+Connection failures auto-detect the failure mode and print the exact fix — see Troubleshooting above.
+
 ## Environment variables
 
 | Variable | Default | Description |

@@ -1,7 +1,7 @@
 /**
  * Storage tool — cookie and browser storage management.
  *
- * Actions: get_cookies, set_cookie, delete_cookies, clear_cookies, clear_data, quota.
+ * Actions: get_cookies, set_cookie, delete_cookies, clear_cookies, clear_data, quota, export_state, import_state (one-shot auth-state snapshot/restore).
  * Delegates to CDP Network and Storage domains.
  */
 
@@ -252,6 +252,128 @@ async function handleSetStorage(
 
   return ok(`${area}["${key}"] set (${value.length} chars).`);
 }
+// ─── storageState one-shot (5.1.0 A3) ───────────────────────────────
+
+interface StateCookie {
+  name: string; value: string; domain?: string; url?: string; path?: string;
+  expires?: number; httpOnly?: boolean; secure?: boolean; sameSite?: string;
+}
+
+interface StateOrigin {
+  origin: string;
+  /** Playwright array form or flat object form. */
+  localStorage?: Array<{ name: string; value: string }> | Record<string, string>;
+}
+
+interface StorageState {
+  cookies?: StateCookie[];
+  origins?: StateOrigin[];
+}
+
+function normalizeEntries(ls: StateOrigin['localStorage']): Array<{ name: string; value: string }> {
+  if (!ls) return [];
+  if (Array.isArray(ls)) return ls.filter((e) => e && typeof e.name === 'string');
+  return Object.entries(ls).map(([name, value]) => ({ name, value: String(value) }));
+}
+
+async function handleExportState(
+  ctx: ServerContext,
+  params: Record<string, unknown>,
+): Promise<ToolResult> {
+  const sess = params._sessionId as string;
+  await ctx.sendCommand('Network.enable', {}, sess);
+
+  const result = (await ctx.sendCommand('Network.getCookies', {}, sess)) as Record<string, unknown>;
+  const cookies = (result.cookies ?? []) as Array<Record<string, unknown>>;
+
+  const urlResult = (await ctx.sendCommand('Runtime.evaluate', {
+    expression: 'location.origin', returnByValue: true,
+  }, sess)) as Record<string, unknown>;
+  const origin = ((urlResult.result as Record<string, unknown>)?.value as string) ?? '';
+
+  const lsRaw = await evalAndGet<unknown>(ctx, sess, await buildGetStorageExpression('localStorage'));
+  const localStorage = (lsRaw && typeof lsRaw === 'object' ? lsRaw : {}) as Record<string, string>;
+
+  const origins: Array<{ origin: string; localStorage: Record<string, string> }> = [];
+  if (origin) origins.push({ origin, localStorage });
+
+  const state: Record<string, unknown> = { cookies, origins };
+  if (params.includeSessionStorage === true && origin) {
+    const ssRaw = await evalAndGet<unknown>(ctx, sess, await buildGetStorageExpression('sessionStorage'));
+    (origins[0] as Record<string, unknown>).sessionStorage =
+      (ssRaw && typeof ssRaw === 'object' ? ssRaw : {}) as Record<string, string>;
+  }
+
+  const json = JSON.stringify(state, null, 2);
+  return ok('Storage state (' + cookies.length + ' cookie(s), ' + origins.length + ' origin(s), ' + Object.keys(localStorage).length + ' localStorage key(s)).\nPass this object as `state` to storage.import_state to restore:\n\n' + json);
+}
+
+async function handleImportState(
+  ctx: ServerContext,
+  params: Record<string, unknown>,
+): Promise<ToolResult> {
+  const sess = params._sessionId as string;
+  const state = params.state as StorageState | undefined;
+  if (!state || typeof state !== 'object') {
+    return fail("Provide 'state' — the object returned by export_state (cookies + origins).");
+  }
+
+  await ctx.sendCommand('Network.enable', {}, sess);
+  if (params.clearFirst === true) {
+    await ctx.sendCommand('Network.clearBrowserCookies', {}, sess);
+  }
+
+  let set = 0, failed = 0;
+  for (const c of state.cookies ?? []) {
+    const p: Record<string, unknown> = { name: c.name, value: c.value };
+    if (c.domain) p.domain = c.domain;
+    if (c.url) p.url = c.url;
+    if (c.path) p.path = c.path;
+    if (c.expires !== undefined && c.expires > 0) p.expires = c.expires;
+    if (c.httpOnly !== undefined) p.httpOnly = c.httpOnly;
+    if (c.secure !== undefined) p.secure = c.secure;
+    if (c.sameSite) {
+      p.sameSite = c.sameSite;
+      if (c.sameSite === 'None' && c.secure === undefined) p.secure = true;
+    }
+    if (!p.domain && !p.url) { failed++; continue; }
+    try {
+      const r = (await ctx.sendCommand('Network.setCookie', p, sess)) as Record<string, unknown>;
+      if (r.success === true) set++; else failed++;
+    } catch { failed++; }
+  }
+
+  const urlResult = (await ctx.sendCommand('Runtime.evaluate', {
+    expression: 'location.origin', returnByValue: true,
+  }, sess)) as Record<string, unknown>;
+  const currentOrigin = ((urlResult.result as Record<string, unknown>)?.value as string) ?? '';
+
+  let applied = 0;
+  const skipped: string[] = [];
+  for (const o of state.origins ?? []) {
+    if (o.origin !== currentOrigin) { skipped.push(o.origin); continue; }
+    for (const entry of normalizeEntries(o.localStorage)) {
+      try {
+        await ctx.sendCommand('Runtime.evaluate', {
+          expression: 'try { localStorage.setItem(' + JSON.stringify(entry.name) + ', ' + JSON.stringify(entry.value) + '); } catch (e) {}',
+        }, sess);
+        applied++;
+      } catch { /* skip bad entry */ }
+    }
+  }
+
+  const lines = [
+    'Imported: ' + set + ' cookie(s) set' + (failed ? ' (' + failed + ' failed/skipped)' : '') + ', ' + applied + ' localStorage entr' + (applied === 1 ? 'y' : 'ies') + ' applied.',
+  ];
+  if (skipped.length) {
+    lines.push(
+      'localStorage for other origins not applied (browser storage is per-origin — ' +
+      'navigate to each origin and re-import): ' + skipped.join(', '),
+    );
+  }
+  return ok(lines.join('\n'));
+}
+
 
 /**
  * Parity with Playwright MCP browser_localstorage_clear / browser_sessionstorage_clear
@@ -299,11 +421,13 @@ export function registerStorageTools(
         "- get_storage: Read localStorage/sessionStorage. Without 'key' returns the whole object as JSON (requires: tabId; optional: storageType[local|session, default local], key)",
         '- set_storage: Write a localStorage/sessionStorage key (requires: tabId, key, value; optional: storageType[local|session, default local])',
         '- delete_storage: Remove a key (or clear all when omitted) from localStorage/sessionStorage (requires: tabId; optional: storageType[local|session, default local], key)',
+  '- export_state: One-shot auth-state export — all cookies + current origin\'s localStorage as a Playwright-compatible JSON object (requires: tabId; optional: includeSessionStorage). Feed the returned object into import_state',
+  '- import_state: Restore a storage state — sets cookies browser-wide and applies localStorage for the CURRENT page origin (other origins reported as skipped — storage is per-origin; navigate there and re-import) (requires: tabId, state; optional: clearFirst — clear all cookies first)',
       ].join('\n'),
       inputSchema: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['get_cookies', 'set_cookie', 'delete_cookies', 'clear_cookies', 'clear_data', 'quota', 'get_storage', 'set_storage', 'delete_storage'], description: 'Storage action.' },
+          action: { type: 'string', enum: ['get_cookies', 'set_cookie', 'delete_cookies', 'clear_cookies', 'clear_data', 'quota', 'get_storage', 'set_storage', 'delete_storage', 'export_state', 'import_state'], description: 'Storage action.' },
           tabId: { type: 'string', description: 'Tab ID.' },
           urls: { type: 'array', items: { type: 'string' }, description: 'URLs for get_cookies.' },
           name: { type: 'string', description: 'Cookie name.' },
@@ -321,6 +445,9 @@ export function registerStorageTools(
           key: { type: 'string', description: 'Key for get_storage/set_storage/delete_storage. Omit on get/delete to operate on the whole storage area.' },
           sessionId: { type: 'string', description: 'Agent session ID for tab ownership and isolation. Tabs are locked to sessions. Default: per-process UUID.' },
           cleanupStrategy: { type: 'string', enum: ['close', 'detach', 'none'], description: "Tab cleanup on session expiry. 'detach' (default) keeps tabs open, 'close' removes them, 'none' skips cleanup. Sticky per session." },
+      state: { type: 'object', description: 'import_state: the storage state object returned by export_state ({ cookies: [...], origins: [{ origin, localStorage }] }).' },
+      clearFirst: { type: 'boolean', description: 'import_state: clear all cookies before importing (default false).' },
+      includeSessionStorage: { type: 'boolean', description: 'export_state: also capture sessionStorage for the current origin (default false).' },
           exclusive: { type: 'boolean', description: 'Lock tab to this session (default: true). Set false to allow shared access.' },
         },
         required: ['action', 'tabId'],
@@ -337,7 +464,9 @@ export function registerStorageTools(
           case 'get_storage':     return handleGetStorage(ctx, params);
           case 'set_storage':     return handleSetStorage(ctx, params);
           case 'delete_storage':  return handleDeleteStorage(ctx, params);
-          default:                return fail(`Unknown storage action: "${action}". Use: get_cookies, set_cookie, delete_cookies, clear_cookies, clear_data, quota, get_storage, set_storage, delete_storage`);
+          case 'export_state':   return handleExportState(ctx, params);
+          case 'import_state':   return handleImportState(ctx, params);
+          default:                return fail(`Unknown storage action: "${action}". Use: get_cookies, set_cookie, delete_cookies, clear_cookies, clear_data, quota, get_storage, set_storage, delete_storage, export_state, import_state`);
         }
       },
     }),

@@ -259,7 +259,7 @@ function collectFrameIds(frameTree: { frame: { id: string }; childFrames?: any[]
 }
 
 /** Record uid → session routing for all nodes with assigned uids. */
-function tagNodesWithSession(nodes: AXNode[], sessionId: string, routing: Map<number, string>): void {
+export function tagNodesWithSession(nodes: AXNode[], sessionId: string, routing: Map<number, string>): void {
   for (const node of nodes) {
     if (node.uid !== undefined) {
       routing.set(node.uid, sessionId);

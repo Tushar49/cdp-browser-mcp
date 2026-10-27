@@ -36,6 +36,7 @@ import { TabOwnership } from './session/tab-ownership.js';
 import { ModalStateManager } from './session/modal-state.js';
 import type { ModalState } from './session/modal-state.js';
 import { HealthMonitor } from './connection/health-monitor.js';
+import { DomainCapabilities } from './connection/capabilities.js';
 import { SnapshotCache } from './snapshot/cache.js';
 import { ToolRegistry } from './tools/registry.js';
 import { preprocessToolCall } from './tools/dispatch.js';
@@ -60,7 +61,7 @@ import { getSlimTools, mapSlimToFull } from './tools/slim-mode.js';
 
 // ─── Bootstrap ──────────────────────────────────────────────────────
 
-const VERSION = '5.0.3';
+const VERSION = '5.1.0';
 
 const config = loadConfig();
 
@@ -78,6 +79,9 @@ const healthMonitor = new HealthMonitor(cdpClient, {
 const domainManager = new DomainManager();
 const tabSessionService = new TabSessionService();
 const snapshotCache = new SnapshotCache();
+
+// CDP domain capability report (5.1.0 B1) — invalidated on disconnect below
+const capabilities = new DomainCapabilities();
 const registry = new ToolRegistry();
 
 // Wire auto-reconnect: when the WebSocket drops, let HealthMonitor retry
@@ -90,6 +94,7 @@ cdpClient.on('disconnected', () => {
   eventPipelineWired = false;
   domainManager.clearAll();
   snapshotCache.clear();
+  capabilities.clear();
   tabSessionService.clear();
   healthMonitor.onDisconnect().catch(() => {
     // Reconnect failed — next tool call will trigger autoConnect
@@ -455,6 +460,7 @@ function wireEventPipeline(serverCtx: ServerContext): void {
 // ─── Server Context (DI container) ──────────────────────────────────
 
 const ctx: ServerContext = {
+  capabilities,
   config,
   cdpClient,
   healthMonitor,
@@ -472,6 +478,7 @@ const ctx: ServerContext = {
   networkReqs: new Map(),
   downloads: new Map(),
   pendingDialogs: new Map(),
+        findState: new Map(),
   pendingFileChoosers: new Map(),
   pausedTabs: new Map(),
   pendingFetchRequests: new Map(),
@@ -495,6 +502,9 @@ async function ensureConnected(): Promise<void> {
 
 // ─── Demo Tools ─────────────────────────────────────────────────────
 
+const AUTO_CONNECT_HINT =
+  '\nBrowser connects automatically when you use any browser tool — just call tabs.list or page.goto.';
+
 registry.register(
   defineTool({
     name: 'ping',
@@ -503,7 +513,7 @@ registry.register(
     handler: async () =>
       success(
         `pong — CDP Browser MCP v${VERSION}\nConnected: ${cdpClient.isConnected}` +
-          (cdpClient.isConnected ? `\nMode: ${healthMonitor.connectionMode}` : ''),
+          (cdpClient.isConnected ? `\nMode: ${healthMonitor.connectionMode}` : AUTO_CONNECT_HINT),
       ),
   }),
 );
@@ -519,13 +529,41 @@ registry.register(
         `Connected: ${cdpClient.isConnected}`,
         ...(cdpClient.isConnected
           ? [`Connection mode: ${healthMonitor.connectionMode}`]
-          : []),
+          : [AUTO_CONNECT_HINT.trim()]),
         `Process scan: ${config.processScan ? 'on' : 'off'}`,
         `Default timeout: ${config.globalTimeout}ms`,
         `Default cleanup: ${config.defaultCleanupStrategy}`,
         `Session TTL: ${config.sessionTTL}ms`,
         `Registered tools: ${registry.size}`,
       ];
+      if (cdpClient.isConnected) {
+        try {
+          // Probe through a managed page session - the browser-level endpoint
+          // only serves browser-wide domains, so page-scoped domains (Overlay,
+          // FindInPage, Ads, ...) report "wasn't found" without one.
+          let firstSession = tabSessionService.entries().next().value?.[1] as string | undefined;
+          if (!firstSession) {
+            // No managed tab yet - attach to any open page tab just for probing
+            // (canaries are read-only or validation-rejected; attaching is inert)
+            try {
+              const { targetInfos } = (await cdpClient.send('Target.getTargets', {})) as {
+                targetInfos?: Array<{ targetId: string; type: string }>;
+              };
+              const pageTarget = targetInfos?.find((t) => t.type === 'page');
+              if (pageTarget) {
+                firstSession = (await tabSessionService.getSession(cdpClient, pageTarget.targetId)) as string;
+              }
+            } catch { /* fall back to browser-level probe */ }
+          }
+          const { count, missing } = await capabilities.summarize(cdpClient, firstSession);
+          lines.push(`CDP features (probed${firstSession ? ' on page session' : ' browser-level - no page session'}): ${count}/${count + missing.length}`);
+          if (missing.length > 0) {
+            lines.push(`Notable domains missing: ${missing.join(', ')}`);
+          }
+        } catch (e) {
+          lines.push('CDP features: unavailable (' + (e instanceof Error ? e.message : String(e)) + ')');
+        }
+      }
       return success(lines.join('\n'));
     },
   }),
@@ -575,7 +613,12 @@ if (config.slimMode) {
 
 const server = new Server(
   { name: 'cdp-browser', version: VERSION },
-  { capabilities: { tools: {} } },
+  {
+    capabilities: { tools: {} },
+    instructions: `CDP Browser MCP attaches your REAL running browser (cookies, logins, extensions stay). 14 tools: tabs, page, interact, form, execute, observe, emulate, storage, intercept, debug, browser, cleanup, ping, status. The browser connects automatically on the first browser-tool call - ping/status may say Connected: false before that; just call any browser tool.
+
+CALLING CONVENTION (critical): every tool is ONE tool with an action enum parameter - there are NO per-action subtools. Call like tools["cdp-browser"].tabs({ action: "list" }), tools["cdp-browser"].page({ action: "goto", tabId, url }), tools["cdp-browser"].interact({ action: "click", tabId, uid }). WRONG: tabs.list(), tabs(), page.goto(url) - these tool names do not exist and fail schema validation. If unsure of an action or parameter, read the tool's description/enum first; tabs without action defaults to listing. Two connection modes: launch flag (--remote-debugging-port + explicit --user-data-dir) or the browser built-in chrome://inspect/#remote-debugging toggle (a permission dialog appears - click Allow).`,
+  },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

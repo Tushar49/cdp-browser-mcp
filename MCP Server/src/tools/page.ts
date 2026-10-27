@@ -16,6 +16,7 @@ import { ActionableError, Errors, wrapError } from '../utils/error-handler.js';
 import { sleep, waitForReadyState, waitForText, waitForTextGone, waitForSelector } from '../utils/wait.js';
 import type { WaitUntil, SelectorState } from '../utils/wait.js';
 import { TempFileManager } from '../utils/temp-files.js';
+import { isMethodMissingError } from '../connection/capabilities.js';
 import type { AXNode } from '../snapshot/accessibility.js';
 import { isSlimMode, defaultSnapshotMaxLength } from './slim-mode.js';
 
@@ -65,7 +66,7 @@ interface PageArgs {
   uid?: number;
   // Content
   selector?: string;
-  format?: 'text' | 'html' | 'full';
+  format?: 'text' | 'html' | 'full' | 'annotated';
   // Wait
   text?: string;
   textGone?: string;
@@ -73,6 +74,8 @@ interface PageArgs {
   state?: SelectorState;
   // Dialog
   accept?: boolean;
+  // Find
+  caseSensitive?: boolean;
   // PDF
   landscape?: boolean;
   scale?: number;
@@ -91,6 +94,8 @@ interface PageArgs {
   persistent?: boolean;
   // inject
   script?: string;
+  // screen recording (B6 S2)
+  audio?: boolean;
   // bypass_csp
   enabled?: boolean;
   // Snapshot diff
@@ -270,7 +275,7 @@ async function handleFrames(ctx: ServerContext, args: PageArgs): Promise<ToolRes
 async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
 
-  const { captureAccessibilityTree, captureFullTree, serializeTree } = await import('../snapshot/accessibility.js');
+  const { captureAccessibilityTree, captureFullTree, serializeTree, tagNodesWithSession } = await import('../snapshot/accessibility.js');
   const { TokenOptimizer } = await import('../snapshot/token-optimizer.js');
   const { ElementResolver } = await import('../snapshot/element-resolver.js');
 
@@ -298,8 +303,11 @@ async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolR
   let nodeCount: number;
   let allOptimized: AXNode[];
 
-  if (childSessions.size > 0) {
-    // Multi-frame capture: main + OOP iframes
+  // Multi-frame capture: main frame + same-origin frames + OOP iframes.
+  // NOT gated on childSessions: same-origin iframe content (e.g. the reCAPTCHA
+  // widget) also needs per-frame trees, and has no OOP session to discover
+  // (A5b fix - the old gate skipped frame capture whenever no OOPIF existed).
+  {
     const fullTree = await captureFullTree(cdpSend as any, sess, childSessions);
 
     const optimizedMain = TokenOptimizer.optimize(fullTree.mainNodes);
@@ -309,10 +317,16 @@ async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolR
     const slim = isSlimMode();
     const frameParts: string[] = [];
     const frameOptimized: AXNode[] = [];
+    // uid -> childSessionId routing, built AFTER resolver.assignRefs - uids only
+    // exist post-assignment, so captureFullTree's early tagging pass finds none
+    // (A5b fix: this map was always empty, disabling cross-frame interaction)
+    const refRouting = new Map<number, string>();
     let frameIndex = 1;
-    for (const [, { nodes }] of fullTree.frameNodes) {
+    for (const [targetId, { nodes }] of fullTree.frameNodes) {
       const optimizedFrame = TokenOptimizer.optimize(nodes);
       resolver.assignRefs(optimizedFrame);
+      const childInfo = childSessions.get(targetId);
+      if (childInfo) tagNodesWithSession(optimizedFrame, childInfo.sessionId, refRouting);
       // Slim mode shortens "[frame N] " (10 chars) → "[fN] " (5 chars).
       const framePrefix = slim ? `[f${frameIndex}] ` : `[frame ${frameIndex}] `;
       frameParts.push(serializeTree(optimizedFrame, 0, framePrefix));
@@ -321,20 +335,12 @@ async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolR
     }
 
     // Store uid → session routing for cross-frame element interaction
-    ctx.tabSessions.setRefRouting(sess, fullTree.refRouting);
+    ctx.tabSessions.setRefRouting(sess, refRouting);
 
     const allParts = [mainSnapshot, ...frameParts].filter(Boolean);
     snapshot = allParts.join('\n');
     allOptimized = [...optimizedMain, ...frameOptimized];
     nodeCount = countNodes(allOptimized);
-  } else {
-    // Single-frame capture (common case)
-    const tree = await captureAccessibilityTree(cdpSend as any, sess);
-    const optimized = TokenOptimizer.optimize(tree);
-    resolver.assignRefs(optimized);
-    snapshot = serializeTree(optimized);
-    allOptimized = optimized;
-    nodeCount = countNodes(optimized);
   }
 
   // Get page title and URL
@@ -394,6 +400,40 @@ async function handleSnapshot(ctx: ServerContext, args: PageArgs): Promise<ToolR
   return ok(TokenOptimizer.capLength(fullOutput, maxLen, slim));
 }
 
+/**
+ * Page.captureScreenshot can hang indefinitely when the browser window is
+ * occluded/minimized and a prior interaction invalidated the last rendered
+ * frame (observed after clicks on pages with overlay iframes - the reCAPTCHA
+ * challenge): the compositor never produces the awaited frame and the CDP
+ * call never returns. Mitigation: short first wait, bring the tab to the
+ * front, retry once, then fail with the manual workaround named.
+ */
+async function captureScreenshotWithRecovery(
+  ctx: ServerContext,
+  sess: string,
+  tabId: string,
+  params: Record<string, unknown>,
+): Promise<string> {
+  const attempt = (timeoutMs: number) =>
+    ctx.cdpClient.send('Page.captureScreenshot', params, sess, timeoutMs) as Promise<{ data: string }>;
+  try {
+    return (await attempt(15000)).data;
+  } catch (err) {
+    if (!/timed out/i.test(err instanceof Error ? err.message : String(err))) throw err;
+  }
+  // Timed out - wake the tab and retry once
+  try { await ctx.sendCommand('Page.bringToFront', {}, sess); } catch { /* best effort */ }
+  try { await ctx.cdpClient.send('Target.activateTarget', { targetId: tabId }); } catch { /* best effort */ }
+  try {
+    return (await attempt(20000)).data;
+  } catch {
+    throw new Error(
+      'Page.captureScreenshot is not answering - the browser window is likely occluded or minimized ' +
+      'with a pending frame (seen after interactions on pages with overlay iframes). ' +
+      'Bring the browser window to the foreground or reload the tab, then retry.'
+    );
+  }
+}
 async function handleScreenshot(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
   const params: Record<string, unknown> = {};
@@ -434,7 +474,7 @@ async function handleScreenshot(ctx: ServerContext, args: PageArgs): Promise<Too
       return fail(`Could not get layout for element uid=${args.uid}. It may be hidden or off-screen.`);
     }
 
-    const { data } = await ctx.sendCommand('Page.captureScreenshot', params, sess) as { data: string };
+    const data = await captureScreenshotWithRecovery(ctx, sess, args.tabId, params);
     return saveOrReturnScreenshot(data, params.format as string, args.path);
   }
 
@@ -462,8 +502,8 @@ async function handleScreenshot(ctx: ServerContext, args: PageArgs): Promise<Too
 
     let captureData: string;
     try {
-      const result = await ctx.sendCommand('Page.captureScreenshot', params, sess) as { data: string };
-      captureData = result.data;
+      const result = await captureScreenshotWithRecovery(ctx, sess, args.tabId, params);
+      captureData = result;
     } finally {
       // Restore original viewport
       await ctx.sendCommand('Emulation.clearDeviceMetricsOverride', {}, sess).catch(() => {});
@@ -474,12 +514,39 @@ async function handleScreenshot(ctx: ServerContext, args: PageArgs): Promise<Too
   }
 
   // Viewport screenshot
-  const { data } = await ctx.sendCommand('Page.captureScreenshot', params, sess) as { data: string };
+  const data = await captureScreenshotWithRecovery(ctx, sess, args.tabId, params);
   return saveOrReturnScreenshot(data, params.format as string, args.path);
 }
 
 async function handleContent(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
+
+  // format: 'annotated' - B6 S1 spike: Page.getAnnotatedPageContent returns a
+  // binary protobuf (AnnotatedPageContent proto). Dump size + extracted ASCII
+  // strings so the spike can judge signal vs the token-optimized snapshot.
+  if (args.format === 'annotated') {
+    if (args.uid !== undefined || args.selector) {
+      return fail("format: 'annotated' is page-level - uid/selector not supported.");
+    }
+    let resp: Record<string, unknown>;
+    try {
+      resp = (await ctx.sendCommand('Page.getAnnotatedPageContent', { includeActionableInformation: true }, sess)) as Record<string, unknown>;
+    } catch (err: unknown) {
+      if (isMethodMissingError(err)) {
+        return fail('Page.getAnnotatedPageContent is not supported on this browser (requires a very recent Chromium build).');
+      }
+      throw err;
+    }
+    const buf = Buffer.from(resp.content as string, 'base64');
+    const strings = buf.toString('latin1').match(/[ -~]{8,}/g) ?? [];
+    return ok({
+      spike: true,
+      contentBytes: buf.length,
+      base64Head: buf.toString('base64').slice(0, 500),
+      asciiStrings: strings.slice(0, 80),
+      asciiStringCount: strings.length,
+    });
+  }
 
   // format: "full" returns complete document HTML with doctype
   if (args.format === 'full') {
@@ -626,14 +693,23 @@ async function handlePdf(ctx: ServerContext, args: PageArgs): Promise<ToolResult
 async function handleDialog(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
 
-  // TODO: Wire pendingDialogs state when session management is integrated
+  // Surface pending dialog context from the event pipeline when available
+  const pending = ctx.pendingDialogs.get(sess)?.slice(-1)[0];
   const accept = args.accept !== undefined ? args.accept : true;
   const dialogParams: Record<string, unknown> = { accept };
   if (args.text !== undefined) dialogParams.promptText = args.text;
 
-  await ctx.sendCommand('Page.handleJavaScriptDialog', dialogParams, sess);
+  try {
+    await ctx.sendCommand('Page.handleJavaScriptDialog', dialogParams, sess);
+  } catch (err) {
+    throw new Error(
+      `No JavaScript dialog is open on this tab${pending ? ' (stale pending state: ' + pending.message + ')' : ''}. ` +
+        `Pending dialogs are auto-accepted after a timeout; re-run the action that opened it, then handle within that window.`
+    );
+  }
 
-  return ok(`Dialog handled. Action: ${accept ? 'accepted' : 'dismissed'}${args.text ? ` with text: "${args.text}"` : ''}`);
+  ctx.pendingDialogs.delete(sess);
+  return ok(`Dialog handled. Action: ${accept ? 'accepted' : 'dismissed'}${args.text ? ` with text: "${args.text}"` : ''}${pending ? ` (was: ${pending.type}: ${pending.message})` : ''}`);
 }
 
 async function handleInject(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
@@ -784,6 +860,142 @@ function countNodes(nodes: Array<{ children?: Array<unknown> }>): number {
 
 // ─── Action Dispatch Map ────────────────────────────────────────────
 
+// ─── Find in page (JS window.find - the native FindInPage CDP domain returns
+//     empty values (no match state), so JS is the only readable source) ──
+
+export async function handleFind(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
+  const sess = await getTabSession(ctx, args.tabId);
+  const text = (args.text ?? '').trim();
+  if (!text) return fail("Provide 'text' to search for.");
+  const caseSensitive = args.caseSensitive === true;
+  const result = (await ctx.sendCommand('Runtime.evaluate', {
+    expression: `(() => {
+      const text = ${JSON.stringify(text)};
+      const cs = ${caseSensitive};
+      if (!window.find) return { error: 'window.find is not supported in this browser' };
+      const sel = window.getSelection();
+      const countFromTop = () => {
+        sel.removeAllRanges();
+        window.scrollTo(0, 0);
+        let n = 0;
+        while (n < 1000 && window.find(text, cs, false, false)) n++;
+        return n;
+      };
+      const count = countFromTop();
+      sel.removeAllRanges();
+      window.scrollTo(0, 0);
+      let ordinal = 0;
+      if (count > 0 && window.find(text, cs, false, false)) ordinal = 1;
+      return { count, ordinal };
+    })()`,
+    returnByValue: true,
+  }, sess)) as { result: { value: { count: number; ordinal: number; error?: string } } };
+  const v = result.result?.value;
+  if (!v || v.error) return fail(v?.error ?? 'Find failed.');
+  if (v.count === 0) {
+    ctx.findState.delete(sess);
+    return ok(`No matches for "${text}".`);
+  }
+  ctx.findState.set(sess, { text, caseSensitive, count: v.count, ordinal: v.ordinal });
+  return ok(`Found ${v.count} match(es) for "${text}" - match ${v.ordinal}/${v.count} selected and highlighted.`);
+}
+
+export async function handleFindNext(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
+  const sess = await getTabSession(ctx, args.tabId);
+  const state = ctx.findState.get(sess);
+  if (!state) return fail('No active find session. Call action: "find" with text first.');
+  const result = (await ctx.sendCommand('Runtime.evaluate', {
+    expression: `(() => {
+      const text = ${JSON.stringify(state.text)};
+      const cs = ${state.caseSensitive};
+      const sel = window.getSelection();
+      if (window.find(text, cs, false, false)) return { wrapped: false };
+      sel.removeAllRanges();
+      window.scrollTo(0, 0);
+      if (window.find(text, cs, false, false)) return { wrapped: true };
+      return { lost: true };
+    })()`,
+    returnByValue: true,
+  }, sess)) as { result: { value: { wrapped?: boolean; lost?: boolean } } };
+  const v = result.result?.value;
+  if (v?.lost) {
+    ctx.findState.delete(sess);
+    return ok(`The page changed and "${state.text}" no longer matches. Run find again to restart.`);
+  }
+  state.ordinal = v?.wrapped ? 1 : (state.ordinal % state.count) + 1;
+  ctx.findState.set(sess, state);
+  return ok(`Match ${state.ordinal}/${state.count} for "${state.text}" selected${v?.wrapped ? " (wrapped to first)" : ""}.`);
+}
+
+export async function handleFindStop(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
+  const sess = await getTabSession(ctx, args.tabId);
+  const had = ctx.findState.delete(sess);
+  await ctx.sendCommand('Runtime.evaluate', {
+    expression: '(() => { const s = window.getSelection(); if (s) s.removeAllRanges(); return true; })()',
+    returnByValue: true,
+  }, sess).catch(() => {});
+  return ok(had ? 'Find session stopped, selection cleared.' : 'No active find session.');
+}
+
+export async function handleRecordStart(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
+  const sess = await getTabSession(ctx, args.tabId);
+  await ensureDomain(ctx, sess, 'Page');
+  try {
+    await ctx.sendCommand('Page.startScreenRecording', {
+      audio: args.audio ?? false,
+      frameRate: 25,
+      maxWidth: 1920,
+      maxHeight: 1080,
+    }, sess);
+  } catch (err: unknown) {
+    if (isMethodMissingError(err)) {
+      return fail('Page.startScreenRecording is not supported on this browser (requires a recent Chromium build).');
+    }
+    throw err;
+  }
+  return ok(`Screen recording started (audio: ${args.audio ?? false ? 'on' : 'off'}, 25fps, 1920x1080 cap). Run record_stop to save the file.`);
+}
+
+export async function handleRecordStop(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
+  const sess = await getTabSession(ctx, args.tabId);
+  let handle: string;
+  try {
+    const res = (await ctx.sendCommand('Page.stopScreenRecording', {}, sess)) as { stream?: string };
+    if (!res.stream) return fail('No screen recording stream returned - was record_start called on this tab?');
+    handle = res.stream;
+  } catch (err: unknown) {
+    if (isMethodMissingError(err)) {
+      return fail('Page.stopScreenRecording is not supported on this browser.');
+    }
+    throw err;
+  }
+
+  // Drain the IO stream into one buffer
+  const chunks: Buffer[] = [];
+  for (;;) {
+    const chunk = (await ctx.sendCommand('IO.read', { handle, size: 1048576 }, sess)) as { data?: string; eof?: boolean };
+    if (chunk.data) chunks.push(Buffer.from(chunk.data, 'base64'));
+    if (chunk.eof) break;
+    if (chunks.length > 512) return fail('Screen recording stream exceeded 512MB - aborted.');
+  }
+  await ctx.sendCommand('IO.close', { handle }, sess).catch(() => {});
+
+  const data = Buffer.concat(chunks);
+  if (args.path) {
+    const safePath = validateOutputPath(args.path);
+    writeFileSync(safePath, data);
+    return ok(`Recording saved to: ${safePath} (${(data.length / 1024 / 1024).toFixed(1)}MB)`);
+  }
+  const tempDir = ctx.config.tempDir || join(process.cwd(), '.temp');
+  const manager = new TempFileManager({
+    tempDir,
+    maxTempFiles: ctx.config.maxTempFiles,
+    maxTempAgeMs: ctx.config.maxTempAgeMs,
+  });
+  const file = manager.write(`screen-recording-${Date.now()}.mp4`, data, 'binary');
+  return ok(`Recording saved to: ${file} (${(data.length / 1024 / 1024).toFixed(1)}MB)`);
+}
+
 const PAGE_ACTIONS: Record<string, (ctx: ServerContext, args: PageArgs) => Promise<ToolResult>> = {
   goto: handleGoto,
   back: handleBack,
@@ -800,6 +1012,11 @@ const PAGE_ACTIONS: Record<string, (ctx: ServerContext, args: PageArgs) => Promi
   add_style: handleAddStyle,
   bypass_csp: handleBypassCsp,
   frames: handleFrames,
+  find: handleFind,
+  find_next: handleFindNext,
+  find_stop: handleFindStop,
+  record_start: handleRecordStart,
+  record_stop: handleRecordStop,
 };
 
 // ─── Tool Registration ──────────────────────────────────────────────
@@ -820,6 +1037,7 @@ const PAGE_DESCRIPTION = [
   '- screenshot: Take a screenshot of the page or a specific element (requires: tabId; optional: fullPage, quality, uid, type[png|jpeg], path — absolute file path to save to disk)',
   "- content: Extract text or HTML content from the page or an element (requires: tabId; optional: uid, selector, format[text|html|full] — 'full' returns complete document HTML with doctype)",
   "- set_content: Set the page's HTML content directly (requires: tabId, html)",
+  '- record_start / record_stop: Record the tab screen to an MP4 video (experimental; requires: tabId; record_start optional: audio[default false]; record_stop optional: path — absolute file path, else temp file)',
   "- wait: Wait for condition or fixed delay (requires: tabId; provide text, textGone, selector for polling — or just timeout for fixed delay; optional: timeout[ms], state[visible|hidden|attached|detached] for selector waits)",
   '- pdf: Export page as PDF to temp file (requires: tabId; optional: landscape, scale, paperWidth, paperHeight, margin{top,bottom,left,right})',
   '- dialog: Handle a pending JavaScript dialog (alert/confirm/prompt) (requires: tabId; optional: accept[default:true], text for prompt response)',
@@ -840,9 +1058,10 @@ const PAGE_INPUT_SCHEMA = {
   properties: {
     action: {
       type: 'string' as const,
-      enum: ['goto', 'back', 'forward', 'reload', 'snapshot', 'screenshot', 'content', 'set_content', 'wait', 'pdf', 'dialog', 'inject', 'add_style', 'bypass_csp', 'frames'] as const,
+      enum: ['goto', 'back', 'forward', 'reload', 'snapshot', 'screenshot', 'content', 'set_content', 'wait', 'pdf', 'dialog', 'inject', 'add_style', 'bypass_csp', 'frames', 'find', 'find_next', 'find_stop', 'record_start', 'record_stop'] as const,
       description: 'Page action.',
     },
+    caseSensitive: { type: 'boolean' as const, description: 'Find action: match case (default: false).' },
     tabId: { type: 'string' as const, description: 'Tab ID.' },
     url: { type: 'string' as const, description: 'URL for goto.' },
     waitUntil: {
@@ -870,10 +1089,11 @@ const PAGE_INPUT_SCHEMA = {
     selector: { type: 'string' as const, description: 'CSS selector for content/wait.' },
     format: {
       type: 'string' as const,
-      enum: ['text', 'html', 'full'] as const,
-      description: "Content format. 'text' (default) for visible text, 'html' for innerHTML, 'full' for complete document HTML with doctype.",
+      enum: ['text', 'html', 'full', 'annotated'] as const,
+      description: "Content format. 'text' (default) for visible text, 'html' for innerHTML, 'full' for complete document HTML with doctype, 'annotated' for the experimental Page.getAnnotatedPageContent binary-proto dump (B6 spike).",
     },
-    text: { type: 'string' as const, description: 'Text to wait for / dialog prompt text.' },
+    audio: { type: 'boolean' as const, description: 'record_start: capture audio (default false).' },
+    text: { type: 'string' as const, description: "Text to wait for / dialog prompt text / find: text to search for." },
     textGone: { type: 'string' as const, description: 'Text to wait to disappear.' },
     timeout: {
       type: 'number' as const,

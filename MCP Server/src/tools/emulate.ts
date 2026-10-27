@@ -9,6 +9,9 @@ import type { ToolRegistry } from './registry.js';
 import type { ServerContext, ToolResult } from '../types.js';
 import { defineTool } from './base-tool.js';
 import { ok, fail } from '../utils/helpers.js';
+import { DEVICE_PRESETS, listDeviceNames } from './device-presets.js';
+import { isMethodMissingError } from '../connection/capabilities.js';
+const NL2 = String.fromCharCode(10);
 
 // ─── Network throttling presets (mirrors server.js) ─────────────────
 
@@ -40,6 +43,9 @@ async function handleEmulate(
     try { await ctx.sendCommand('Emulation.setLocaleOverride', { locale: '' }, sess); } catch { /* ok */ }
     try { await ctx.sendCommand('Emulation.setEmulatedVisionDeficiency', { type: 'none' }, sess); } catch { /* ok */ }
     try { await ctx.sendCommand('Emulation.clearIdleOverride', {}, sess); } catch { /* ok */ }
+    try { await ctx.sendCommand('Emulation.clearDevicePostureOverride', {}, sess); } catch { /* ok */ }
+    // No clear counterpart exists - 'unknown' tier restores the default
+    try { await ctx.sendCommand('Emulation.setCPUPerformanceOverride', { performanceTier: 'unknown' }, sess); } catch { /* ok */ }
     try { await ctx.sendCommand('Emulation.setUserAgentOverride', { userAgent: '' }, sess); } catch { /* ok */ }
     try { await ctx.sendCommand('Emulation.setAutoDarkModeOverride', {}, sess); } catch { /* ok */ }
     try {
@@ -53,6 +59,34 @@ async function handleEmulate(
       await ctx.sendCommand('Security.setIgnoreCertificateErrors', { ignore: false }, sess);
     } catch { /* ok */ }
     return ok('All emulation overrides reset.');
+  }
+
+  // ── Device preset (5.1.0 A4) ──
+  if (params.device === 'list') {
+    return ok('Available device presets:' + NL2 + listDeviceNames().map(function (d) { return '  ' + d; }).join(NL2));
+  }
+  if (params.device) {
+    const descriptor = DEVICE_PRESETS[params.device as string];
+    if (!descriptor) {
+      return fail('Unknown device preset: ' + (params.device as string) + '. Use device: list to see names.');
+    }
+    const explicitUA = !!params.userAgent;
+    const vp = params.viewport as Record<string, unknown> | undefined;
+    const width = (vp ? (vp.width as number) : descriptor.width) ?? descriptor.width;
+    const height = (vp ? (vp.height as number) : descriptor.height) ?? descriptor.height;
+    await ctx.sendCommand('Emulation.setDeviceMetricsOverride', {
+      width,
+      height,
+      deviceScaleFactor: descriptor.deviceScaleFactor,
+      mobile: descriptor.mobile,
+    }, sess);
+    if (descriptor.hasTouch) {
+      await ctx.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }, sess);
+    }
+    if (!explicitUA) {
+      await ctx.sendCommand('Emulation.setUserAgentOverride', { userAgent: descriptor.userAgent }, sess);
+    }
+    results.push(`Device: ${params.device} - ${width}x${height} @${descriptor.deviceScaleFactor}x`);
   }
 
   // ── Viewport ──
@@ -121,6 +155,40 @@ async function handleEmulate(
   if (params.cpuThrottle) {
     await ctx.sendCommand('Emulation.setCPUThrottlingRate', { rate: params.cpuThrottle as number }, sess);
     results.push(`CPU throttle: ${params.cpuThrottle}x`);
+  }
+
+  // ── Device posture (5.1.0 B3, Chrome 153+) ──
+  if (params.devicePosture) {
+    const posture = params.devicePosture as string;
+    if (posture !== 'continuous' && posture !== 'folded') {
+      return fail(`Invalid devicePosture: "${posture}". Use: continuous, folded`);
+    }
+    try {
+      await ctx.sendCommand('Emulation.setDevicePostureOverride', { posture: { type: posture } }, sess);
+      results.push(`Device posture: ${posture}`);
+    } catch (err) {
+      if (isMethodMissingError(err)) {
+        return fail('Emulation.setDevicePostureOverride is not supported on this browser (requires Chrome 153+). Update Chrome/Brave to use device posture emulation.');
+      }
+      throw err;
+    }
+  }
+
+  // ── CPU performance tier (5.1.0 B3, Chrome 153/154+) ──
+  if (params.cpuPerformance) {
+    const tier = params.cpuPerformance as string;
+    if (tier !== 'low' && tier !== 'mid' && tier !== 'high' && tier !== 'ultra') {
+      return fail(`Invalid cpuPerformance: "${tier}". Use: low, mid, high, ultra`);
+    }
+    try {
+      await ctx.sendCommand('Emulation.setCPUPerformanceOverride', { performanceTier: tier }, sess);
+      results.push(`CPU performance: ${tier} tier`);
+    } catch (err) {
+      if (isMethodMissingError(err)) {
+        return fail('Emulation.setCPUPerformanceOverride is not supported on this browser (requires Chrome 153/154+). Update Chrome/Brave to use CPU performance emulation.');
+      }
+      throw err;
+    }
   }
 
   // ── Timezone ──
@@ -205,6 +273,7 @@ export function registerEmulateTools(
         "Use this to test responsive design, mobile views, or simulate slow networks. Set any combination of properties in one call. Pass 'reset: true' to clear all overrides.",
         '',
         'Operations (set any combination in a single call):',
+        '- device: Apply a device preset (optional: device name or list; overrides viewport+UA unless explicitly given)',
         '- viewport: Set viewport dimensions (optional: {width, height, deviceScaleFactor, mobile, touch, landscape})',
         '- colorScheme: Emulate preferred color scheme (optional: dark|light|auto)',
         '- userAgent: Override the browser user agent string (optional: string)',
@@ -215,6 +284,8 @@ export function registerEmulateTools(
         '- visionDeficiency: Simulate vision impairment (optional: none|protanopia|deuteranopia|tritanopia|achromatopsia|blurredVision)',
         '- autoDarkMode: Force automatic dark mode (optional: boolean)',
         '- idle: Emulate idle/locked screen state (optional: active|locked)',
+        '- devicePosture: Foldable device posture override (optional: continuous|folded; Chrome 153+)',
+        '- cpuPerformance: CPU performance tier override (optional: low|mid|high|ultra; Chrome 153/154+)',
         '- networkCondition: Throttle network speed (optional: offline|slow3g|fast3g|slow4g|fast4g|none)',
         '- ignoreSSL: Bypass SSL certificate errors (optional: boolean)',
         '- blockUrls: Block requests matching URL patterns (optional: string array)',
@@ -235,6 +306,7 @@ export function registerEmulateTools(
               touch: { type: 'boolean' }, landscape: { type: 'boolean' },
             },
           },
+          device: { type: 'string', description: 'Device preset name (device: list to enumerate). Applied viewport + DSF + mobile + touch + UA. Explicit viewport/userAgent params override the preset.' },
           colorScheme: { type: 'string', enum: ['dark', 'light', 'auto'], description: 'Color scheme.' },
           userAgent: { type: 'string', description: 'User agent string.' },
           geolocation: {
@@ -252,6 +324,8 @@ export function registerEmulateTools(
           visionDeficiency: { type: 'string', enum: ['none', 'protanopia', 'deuteranopia', 'tritanopia', 'achromatopsia', 'blurredVision'], description: 'Vision deficiency simulation.' },
           autoDarkMode: { type: 'boolean', description: 'Auto dark mode.' },
           idle: { type: 'string', enum: ['active', 'locked'], description: 'Idle state.' },
+          devicePosture: { type: 'string', enum: ['continuous', 'folded'], description: 'Device posture override (Chrome 153+).' },
+          cpuPerformance: { type: 'string', enum: ['low', 'mid', 'high', 'ultra'], description: 'CPU performance tier override (Chrome 153/154+).' },
           networkCondition: { type: 'string', enum: ['offline', 'slow3g', 'fast3g', 'slow4g', 'fast4g', 'none'], description: 'Network throttle preset.' },
           ignoreSSL: { type: 'boolean', description: 'Ignore SSL certificate errors.' },
           blockUrls: { type: 'array', items: { type: 'string' }, description: 'URLs to block.' },
