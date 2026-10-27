@@ -6,6 +6,7 @@ All notable changes to CDP Browser MCP Server will be documented in this file.
 
 ### Changed
 - repo-infra: the "Promote dev to main" workflow now verifies the promote commit carries no dev-only material BEFORE pushing (hard fail instead of a log line), and the agent guide documents the concrete manual-flow verification plus a "never tag past a red Guard main" rule — both learned from the v5.1.0 release race. No package changes.
+- errors: `DomainUnsupportedError` is now a first-class class (thrown by `capabilities.require`) and `wrapError` converts it into an actionable result with fix + domain context — unsupported-feature failures no longer fall through to the generic error text. First step of the 5.2.0 plan (WS3-E4).
 
 ## [5.1.0] - 2026-10-27
 

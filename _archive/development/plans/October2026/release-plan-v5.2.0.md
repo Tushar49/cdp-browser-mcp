@@ -265,23 +265,17 @@ on the demo RP, `dismiss` + `reset_cooldown`, pre-attach-dialog recovery.
 ## WS3 — hygiene + corrections (one or two commits, ride along)
 
 1. **E1 — Brave/upstream attribution errata + observe routing — DECISION
-   GATE (momus finding 1):** first verify `observe.memory` /
-   `observe performance` on the CURRENT Brave 153 build with a healthy
-   tab. Two outcomes:
-   - **Confirmed 5.1.0 regression** (Performance works raw but `observe`
-     fails on the same tab — suspected stale/wrong sessionId routing,
-     `capabilities.ts:81-85` browser-vs-page note): **cut a 5.1.1 patch
-     release immediately** (routing fix + errata CHANGELOG) — a shipped
-     regression does not ride a feature release. E1 in 5.2 then reduces
-     to the docs correction; the 5.1.1 branch merges back to dev before
-     WS1 continues.
-   - **Not reproducible** (transient/stale-session artifact of the 5.1
-     test session): E1 is docs-only — correct the "Brave strips X"
-     claims, wording CONDITIONAL on the stock-Chrome A/B result (do not
-     copy the research doc's "mis-attributed" framing as settled fact —
-     momus finding 2; `Performance.enable` answered OK on Brave in WS0
-     while research §0 predicted absence; both cannot be the settled
-     story yet).
+   GATE (momus finding 1): RESOLVED 2026-10-27 — docs-only path.** Retest
+   on the current Brave 153 build (fresh session, console tab):
+   `observe performance` returned full metrics and `observe.memory`
+   returned real counters via `Memory.getDOMCounters`. The 5.1.0
+   "failures" were stale-session artifacts (crashed test tab), not a
+   Brave strip and not an observe routing bug — **no 5.1.1 patch**.
+   Remaining work: docs errata correcting the "Brave strips X" claims,
+   wording conditional on the stock-Chrome A/B result (momus finding 2;
+   `Performance.enable` answered OK on Brave in WS0 while research §0
+   predicted absence — settle the attribution via the A/B before the
+   errata wording ships).
 2. **E2 — 5.1-debt state sweep:** wire `findState`/`modalStates` into
    `tabs.close` / `cleanup` paths / disconnect handler (§0.2 sites) —
    the NEW state managers' own cleanup is already inside WS1/WS2.
@@ -318,7 +312,7 @@ on the demo RP, `dismiss` + `reset_cooldown`, pre-attach-dialog recovery.
 | Order | Item | Effort | Gate |
 |---|---|---|---|
 | 1 | WS0 spike | done | — |
-| 2 | WS3-E4 wrapError + gating fix (small, WS1 depends on it) | 0.25 | unit |
+| 2 | WS3-E4 wrapError + gating fix (small, WS1 depends on it) | **done 2026-10-27** | 359 tests green |
 | 3 | WS1 `webauthn` state + tool + cleanup + tests | 2 | unit green |
 | 4 | WS1 live verification (webauthn.io + scope + override bits) | 0.5 | live |
 | 5 | WS2 FedCm dialog spike (demo RP; user consent to navigate) | 0.25 | GO/KILL |

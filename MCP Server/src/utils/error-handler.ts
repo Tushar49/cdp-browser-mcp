@@ -30,6 +30,26 @@ export class ActionableError extends Error {
   }
 }
 
+// ─── Domain-unsupported error (capability gate) ─────────────────────
+
+/**
+ * Thrown by `DomainCapabilities.require` when the connected browser does not
+ * implement a CDP domain/method (e.g. Brave/Chrome builds that omit a domain).
+ * `wrapError` recognizes it so unsupported-feature failures render with a
+ * proper "How to fix" instead of the generic fallback.
+ */
+export class DomainUnsupportedError extends Error {
+  public readonly domain: string;
+  public readonly minChrome?: string;
+
+  constructor(message: string, domain: string, minChrome?: string) {
+    super(message);
+    this.name = 'DomainUnsupportedError';
+    this.domain = domain;
+    this.minChrome = minChrome;
+  }
+}
+
 // ─── Error Catalog ──────────────────────────────────────────────────
 
 export const Errors = {
@@ -258,6 +278,13 @@ export const Errors = {
  */
 export function wrapError(error: unknown): ActionableError {
   if (error instanceof ActionableError) return error;
+  if (error instanceof DomainUnsupportedError) {
+    return new ActionableError(
+      error.message,
+      'Update Chrome/Brave to a version that supports this feature, or use a different browser for this capability.',
+      { domain: error.domain, minChrome: error.minChrome },
+    );
+  }
 
   const msg = error instanceof Error ? error.message : String(error);
 
