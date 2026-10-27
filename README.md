@@ -298,7 +298,7 @@ When a connection fails, the server auto-detects the failure mode and prints the
 | Tool | Actions | Description |
 |------|---------|-------------|
 | `tabs` | 7 | Tab management — list, find, open, close, activate, info, set profile |
-| `page` | 20 | Navigation, snapshots, screenshots, content extraction, PDF, dialogs, frames, find-in-page, screen recording |
+| `page` | 20 | Navigation, snapshots, screenshots, content extraction, PDF, dialogs, frames, find-in-page, screen recording (MP4) |
 | `interact` | 12 | Click, hover, type, fill, select, press, drag, scroll, upload, focus, check, tap |
 | `form` | 3 | Smart form filling engine — fill, read, clear; handles text, combobox, checkbox, radio, select, date in one call |
 | `execute` | 3 | JavaScript evaluation — expressions, async scripts, element-scoped calls |
@@ -348,7 +348,7 @@ When a connection fails, the server auto-detects the failure mode and prints the
 | `bypass_csp` | Disable Content Security Policy | `tabId` | `enabled` |
 | `frames` | List all frames with id, URL, origin, depth (same-origin + OOP iframes) | `tabId` | — |
 | `find` / `find_next` / `find_stop` | Find text in page, cycle matches with wrap-around, stop (counts visible matches; `window.find` skips hidden text) | `tabId`, `text` (find) | `caseSensitive` |
-| `record_start` / `record_stop` | Record the tab screen to a webm (experimental, recent Chromium only) | `tabId` | `audio`, `path` (stop) |
+| `record_start` / `record_stop` | Record the tab screen to an MP4 video (experimental, recent Chromium only) | `tabId` | `audio`, `path` (stop) |
 
 ### `interact` — Element Interaction
 

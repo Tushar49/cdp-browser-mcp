@@ -82,9 +82,9 @@ describe('page.record_* (B6 S2, experimental)', () => {
     ]);
     const r = await handleRecordStop(ctx, { tabId: 't1' });
     expect(textOf(r)).toContain('Recording saved to:');
-    expect(textOf(r)).toContain('.webm');
+    expect(textOf(r)).toContain('.mp4');
     // Both chunks concatenated in order
-    const file = textOf(r).match(/Recording saved to: (.+\.webm)/)![1];
+    const file = textOf(r).match(/Recording saved to: (.+\.mp4)/)![1];
     expect(readFileSync(file, 'utf8')).toBe('chunk-one-chunk-two');
     expect(ctx.__calls.some(c => c.method === 'IO.close')).toBe(true);
   });

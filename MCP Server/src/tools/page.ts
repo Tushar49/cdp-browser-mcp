@@ -992,7 +992,7 @@ export async function handleRecordStop(ctx: ServerContext, args: PageArgs): Prom
     maxTempFiles: ctx.config.maxTempFiles,
     maxTempAgeMs: ctx.config.maxTempAgeMs,
   });
-  const file = manager.write(`screen-recording-${Date.now()}.webm`, data, 'binary');
+  const file = manager.write(`screen-recording-${Date.now()}.mp4`, data, 'binary');
   return ok(`Recording saved to: ${file} (${(data.length / 1024 / 1024).toFixed(1)}MB)`);
 }
 
@@ -1037,7 +1037,7 @@ const PAGE_DESCRIPTION = [
   '- screenshot: Take a screenshot of the page or a specific element (requires: tabId; optional: fullPage, quality, uid, type[png|jpeg], path — absolute file path to save to disk)',
   "- content: Extract text or HTML content from the page or an element (requires: tabId; optional: uid, selector, format[text|html|full] — 'full' returns complete document HTML with doctype)",
   "- set_content: Set the page's HTML content directly (requires: tabId, html)",
-  '- record_start / record_stop: Record the tab screen to a webm video (experimental; requires: tabId; record_start optional: audio[default false]; record_stop optional: path — absolute file path, else temp file)',
+  '- record_start / record_stop: Record the tab screen to an MP4 video (experimental; requires: tabId; record_start optional: audio[default false]; record_stop optional: path — absolute file path, else temp file)',
   "- wait: Wait for condition or fixed delay (requires: tabId; provide text, textGone, selector for polling — or just timeout for fixed delay; optional: timeout[ms], state[visible|hidden|attached|detached] for selector waits)",
   '- pdf: Export page as PDF to temp file (requires: tabId; optional: landscape, scale, paperWidth, paperHeight, margin{top,bottom,left,right})',
   '- dialog: Handle a pending JavaScript dialog (alert/confirm/prompt) (requires: tabId; optional: accept[default:true], text for prompt response)',
@@ -1089,8 +1089,8 @@ const PAGE_INPUT_SCHEMA = {
     selector: { type: 'string' as const, description: 'CSS selector for content/wait.' },
     format: {
       type: 'string' as const,
-      enum: ['text', 'html', 'full'] as const,
-      description: "Content format. 'text' (default) for visible text, 'html' for innerHTML, 'full' for complete document HTML with doctype.",
+      enum: ['text', 'html', 'full', 'annotated'] as const,
+      description: "Content format. 'text' (default) for visible text, 'html' for innerHTML, 'full' for complete document HTML with doctype, 'annotated' for the experimental Page.getAnnotatedPageContent binary-proto dump (B6 spike).",
     },
     audio: { type: 'boolean' as const, description: 'record_start: capture audio (default false).' },
     text: { type: 'string' as const, description: "Text to wait for / dialog prompt text / find: text to search for." },
