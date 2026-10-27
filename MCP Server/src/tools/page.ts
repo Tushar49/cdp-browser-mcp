@@ -16,6 +16,7 @@ import { ActionableError, Errors, wrapError } from '../utils/error-handler.js';
 import { sleep, waitForReadyState, waitForText, waitForTextGone, waitForSelector } from '../utils/wait.js';
 import type { WaitUntil, SelectorState } from '../utils/wait.js';
 import { TempFileManager } from '../utils/temp-files.js';
+import { isMethodMissingError } from '../connection/capabilities.js';
 import type { AXNode } from '../snapshot/accessibility.js';
 import { isSlimMode, defaultSnapshotMaxLength } from './slim-mode.js';
 
@@ -65,7 +66,7 @@ interface PageArgs {
   uid?: number;
   // Content
   selector?: string;
-  format?: 'text' | 'html' | 'full';
+  format?: 'text' | 'html' | 'full' | 'annotated';
   // Wait
   text?: string;
   textGone?: string;
@@ -93,6 +94,8 @@ interface PageArgs {
   persistent?: boolean;
   // inject
   script?: string;
+  // screen recording (B6 S2)
+  audio?: boolean;
   // bypass_csp
   enabled?: boolean;
   // Snapshot diff
@@ -518,6 +521,33 @@ async function handleScreenshot(ctx: ServerContext, args: PageArgs): Promise<Too
 async function handleContent(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
 
+  // format: 'annotated' - B6 S1 spike: Page.getAnnotatedPageContent returns a
+  // binary protobuf (AnnotatedPageContent proto). Dump size + extracted ASCII
+  // strings so the spike can judge signal vs the token-optimized snapshot.
+  if (args.format === 'annotated') {
+    if (args.uid !== undefined || args.selector) {
+      return fail("format: 'annotated' is page-level - uid/selector not supported.");
+    }
+    let resp: Record<string, unknown>;
+    try {
+      resp = (await ctx.sendCommand('Page.getAnnotatedPageContent', { includeActionableInformation: true }, sess)) as Record<string, unknown>;
+    } catch (err: unknown) {
+      if (isMethodMissingError(err)) {
+        return fail('Page.getAnnotatedPageContent is not supported on this browser (requires a very recent Chromium build).');
+      }
+      throw err;
+    }
+    const buf = Buffer.from(resp.content as string, 'base64');
+    const strings = buf.toString('latin1').match(/[ -~]{8,}/g) ?? [];
+    return ok({
+      spike: true,
+      contentBytes: buf.length,
+      base64Head: buf.toString('base64').slice(0, 500),
+      asciiStrings: strings.slice(0, 80),
+      asciiStringCount: strings.length,
+    });
+  }
+
   // format: "full" returns complete document HTML with doctype
   if (args.format === 'full') {
     if (args.uid !== undefined || args.selector) {
@@ -907,6 +937,65 @@ export async function handleFindStop(ctx: ServerContext, args: PageArgs): Promis
   return ok(had ? 'Find session stopped, selection cleared.' : 'No active find session.');
 }
 
+export async function handleRecordStart(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
+  const sess = await getTabSession(ctx, args.tabId);
+  await ensureDomain(ctx, sess, 'Page');
+  try {
+    await ctx.sendCommand('Page.startScreenRecording', {
+      audio: args.audio ?? false,
+      frameRate: 25,
+      maxWidth: 1920,
+      maxHeight: 1080,
+    }, sess);
+  } catch (err: unknown) {
+    if (isMethodMissingError(err)) {
+      return fail('Page.startScreenRecording is not supported on this browser (requires a recent Chromium build).');
+    }
+    throw err;
+  }
+  return ok(`Screen recording started (audio: ${args.audio ?? false ? 'on' : 'off'}, 25fps, 1920x1080 cap). Run record_stop to save the file.`);
+}
+
+export async function handleRecordStop(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
+  const sess = await getTabSession(ctx, args.tabId);
+  let handle: string;
+  try {
+    const res = (await ctx.sendCommand('Page.stopScreenRecording', {}, sess)) as { stream?: string };
+    if (!res.stream) return fail('No screen recording stream returned - was record_start called on this tab?');
+    handle = res.stream;
+  } catch (err: unknown) {
+    if (isMethodMissingError(err)) {
+      return fail('Page.stopScreenRecording is not supported on this browser.');
+    }
+    throw err;
+  }
+
+  // Drain the IO stream into one buffer
+  const chunks: Buffer[] = [];
+  for (;;) {
+    const chunk = (await ctx.sendCommand('IO.read', { handle, size: 1048576 }, sess)) as { data?: string; eof?: boolean };
+    if (chunk.data) chunks.push(Buffer.from(chunk.data, 'base64'));
+    if (chunk.eof) break;
+    if (chunks.length > 512) return fail('Screen recording stream exceeded 512MB - aborted.');
+  }
+  await ctx.sendCommand('IO.close', { handle }, sess).catch(() => {});
+
+  const data = Buffer.concat(chunks);
+  if (args.path) {
+    const safePath = validateOutputPath(args.path);
+    writeFileSync(safePath, data);
+    return ok(`Recording saved to: ${safePath} (${(data.length / 1024 / 1024).toFixed(1)}MB)`);
+  }
+  const tempDir = ctx.config.tempDir || join(process.cwd(), '.temp');
+  const manager = new TempFileManager({
+    tempDir,
+    maxTempFiles: ctx.config.maxTempFiles,
+    maxTempAgeMs: ctx.config.maxTempAgeMs,
+  });
+  const file = manager.write(`screen-recording-${Date.now()}.webm`, data, 'binary');
+  return ok(`Recording saved to: ${file} (${(data.length / 1024 / 1024).toFixed(1)}MB)`);
+}
+
 const PAGE_ACTIONS: Record<string, (ctx: ServerContext, args: PageArgs) => Promise<ToolResult>> = {
   goto: handleGoto,
   back: handleBack,
@@ -926,6 +1015,8 @@ const PAGE_ACTIONS: Record<string, (ctx: ServerContext, args: PageArgs) => Promi
   find: handleFind,
   find_next: handleFindNext,
   find_stop: handleFindStop,
+  record_start: handleRecordStart,
+  record_stop: handleRecordStop,
 };
 
 // ─── Tool Registration ──────────────────────────────────────────────
@@ -946,6 +1037,7 @@ const PAGE_DESCRIPTION = [
   '- screenshot: Take a screenshot of the page or a specific element (requires: tabId; optional: fullPage, quality, uid, type[png|jpeg], path — absolute file path to save to disk)',
   "- content: Extract text or HTML content from the page or an element (requires: tabId; optional: uid, selector, format[text|html|full] — 'full' returns complete document HTML with doctype)",
   "- set_content: Set the page's HTML content directly (requires: tabId, html)",
+  '- record_start / record_stop: Record the tab screen to a webm video (experimental; requires: tabId; record_start optional: audio[default false]; record_stop optional: path — absolute file path, else temp file)',
   "- wait: Wait for condition or fixed delay (requires: tabId; provide text, textGone, selector for polling — or just timeout for fixed delay; optional: timeout[ms], state[visible|hidden|attached|detached] for selector waits)",
   '- pdf: Export page as PDF to temp file (requires: tabId; optional: landscape, scale, paperWidth, paperHeight, margin{top,bottom,left,right})',
   '- dialog: Handle a pending JavaScript dialog (alert/confirm/prompt) (requires: tabId; optional: accept[default:true], text for prompt response)',
@@ -966,7 +1058,7 @@ const PAGE_INPUT_SCHEMA = {
   properties: {
     action: {
       type: 'string' as const,
-      enum: ['goto', 'back', 'forward', 'reload', 'snapshot', 'screenshot', 'content', 'set_content', 'wait', 'pdf', 'dialog', 'inject', 'add_style', 'bypass_csp', 'frames', 'find', 'find_next', 'find_stop'] as const,
+      enum: ['goto', 'back', 'forward', 'reload', 'snapshot', 'screenshot', 'content', 'set_content', 'wait', 'pdf', 'dialog', 'inject', 'add_style', 'bypass_csp', 'frames', 'find', 'find_next', 'find_stop', 'record_start', 'record_stop'] as const,
       description: 'Page action.',
     },
     caseSensitive: { type: 'boolean' as const, description: 'Find action: match case (default: false).' },
@@ -1000,6 +1092,7 @@ const PAGE_INPUT_SCHEMA = {
       enum: ['text', 'html', 'full'] as const,
       description: "Content format. 'text' (default) for visible text, 'html' for innerHTML, 'full' for complete document HTML with doctype.",
     },
+    audio: { type: 'boolean' as const, description: 'record_start: capture audio (default false).' },
     text: { type: 'string' as const, description: "Text to wait for / dialog prompt text / find: text to search for." },
     textGone: { type: 'string' as const, description: 'Text to wait to disappear.' },
     timeout: {
