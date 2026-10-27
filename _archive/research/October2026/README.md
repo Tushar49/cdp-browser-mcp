@@ -7,6 +7,8 @@ ships to main. No code changes are planned from this folder yet.
 |---|---|
 | `01-cdp-modernization.md` | Legacy CDP vs the new browser-hosted remote debugging (chrome://inspect toggle / DevTools MCP era) — how to support both without breaking |
 | `02-playwright-gap-analysis.md` | Where cdp-browser lags and leads vs Playwright / Playwright MCP |
+| `2026-10-24-live-sweep-oop-captcha.md` | Live sweep — OOP-iframe + captcha handling findings (5.1.0 input) |
+| `2026-10-27-v5.2-webauthn-fedcm-research.md` | v5.2 research — WebAuthn/FedCm CDP surfaces, upstream `protocol_config.json` attribution, annotated-content proto, competitor inventory (plan input) |
 
 ## Context that triggered this
 
