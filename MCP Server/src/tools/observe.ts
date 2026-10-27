@@ -316,6 +316,9 @@ async function handleMemory(
       // Memory domain unresponsive - fall back to Performance metrics counters
       skipped.push('Memory.getDOMCounters (unsupported or unresponsive)');
       try {
+        await ctx.sendCommand('Performance.enable', {}, sess);
+      } catch { /* best-effort — getMetrics may still work */ }
+      try {
         const perf = (await ctx.sendCommand('Performance.getMetrics', {}, sess)) as Record<string, unknown>;
         const m = (perf.metrics ?? []) as Array<{ name: string; value: number }>;
         const pick = (n: string): number | null => m.find(x => x.name === n)?.value ?? null;
@@ -334,7 +337,7 @@ async function handleMemory(
     if (counters) result.counters = counters;
     if (skipped.length > 0) result.skipped = skipped;
     if (!counters) {
-      return fail('Memory counters unavailable on this browser (Memory and Performance domains both unresponsive).');
+      return fail(`Memory counters unavailable on this browser (Memory and Performance domains both unresponsive). Tried: ${skipped.join('; ')}`);
     }
     return ok(result);
   } catch (err: unknown) {
