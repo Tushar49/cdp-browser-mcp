@@ -7,6 +7,8 @@
 
 import type { ToolRegistry } from './registry.js';
 import type { ServerContext, ToolResult, NetworkRequestEntry, DownloadEntry } from '../types.js';
+import { TempFileManager } from '../utils/temp-files.js';
+import { join } from 'path';
 import { defineTool } from './base-tool.js';
 import { ok, fail } from '../utils/helpers.js';
 
@@ -63,12 +65,24 @@ async function handleConsole(
   return ok(`${logs.length} console message(s):\n\n${lines.join('\n')}`);
 }
 
+/**
+ * B4: enable durable network messages so response bodies survive
+ * cross-process navigations. Silent-off when unsupported (pre-Chrome-153).
+ */
+function ensureNetworkResilience(ctx: ServerContext, sess: string): void {
+  ctx.sendCommand('Network.configureDurableMessages', {
+    maxTotalBufferSize: 104857600,
+    maxResourceBufferSize: 20971520,
+  }, sess).catch(() => { /* unsupported - silent */ });
+}
+
 async function handleNetwork(
   ctx: ServerContext,
   params: Record<string, unknown>,
 ): Promise<ToolResult> {
   const sess = params._sessionId as string;
   await ctx.sendCommand('Network.enable', {}, sess);
+  ensureNetworkResilience(ctx, sess);
 
   // Live in-memory store filled by the runtime event pipeline
   // (Network.requestWillBeSent / responseReceived / loadingFinished in index.ts)
@@ -108,6 +122,7 @@ async function handleRequest(
 ): Promise<ToolResult> {
   const sess = params._sessionId as string;
   await ctx.sendCommand('Network.enable', {}, sess);
+  ensureNetworkResilience(ctx, sess);
 
   // Parity with Playwright MCP browser_network_requests — single-call equivalent.
   // Allow `urlFilter` (substring) as an alternative to `requestId`. We resolve the
@@ -144,14 +159,46 @@ async function handleRequest(
   const result: Record<string, unknown> = { requestId };
   if (resolvedFrom !== null) result.matchedFrom = resolvedFrom;
 
-  // Get response body
+  // Get response body (B4: large bodies stream to a temp file instead of
+  // inlining; unretained bodies retry via Network.streamResourceContent)
+  const INLINE_BODY_CAP = 60_000;
+  const PREVIEW = 2_000;
   try {
-    const resp = (await ctx.sendCommand('Network.getResponseBody', { requestId }, sess)) as Record<string, unknown>;
-    if (resp.base64Encoded) {
-      const decoded = Buffer.from(resp.body as string, 'base64');
-      result.responseBody = decoded.toString('utf8');
-    } else {
-      result.responseBody = resp.body;
+    let body: string | null = null;
+    let base64 = false;
+    try {
+      const resp = (await ctx.sendCommand('Network.getResponseBody', { requestId }, sess)) as Record<string, unknown>;
+      body = resp.body as string;
+      base64 = !!resp.base64Encoded;
+    } catch {
+      // Body not retained (e.g. after cross-process navigation) - stream it
+      // (works when durable messages are configured)
+      try {
+        const streamed = (await ctx.sendCommand('Network.streamResourceContent', { requestId }, sess)) as { bufferedData?: string };
+        body = streamed.bufferedData ?? null;
+        base64 = true;
+        if (body !== null) result.bodySource = 'stream';
+      } catch (e2: unknown) {
+        result.responseBody = `[Not available: ${(e2 as Error).message}]`;
+      }
+    }
+    if (body !== null && body !== undefined) {
+      const decoded = base64 ? Buffer.from(body, 'base64') : Buffer.from(body, 'utf8');
+      const text = decoded.toString('utf8');
+      if (text.length > INLINE_BODY_CAP) {
+        const tempDir = ctx.config.tempDir || join(process.cwd(), '.temp');
+        const manager = new TempFileManager({
+          tempDir,
+          maxTempFiles: ctx.config.maxTempFiles,
+          maxTempAgeMs: ctx.config.maxTempAgeMs,
+        });
+        const file = manager.write(`response-${Date.now()}.txt`, decoded, 'binary');
+        result.responseBodyFile = file;
+        result.responseBodyPreview = text.slice(0, PREVIEW);
+        result.responseBodySize = decoded.length;
+      } else {
+        result.responseBody = text;
+      }
     }
   } catch (e: unknown) {
     result.responseBody = `[Not available: ${(e as Error).message}]`;
