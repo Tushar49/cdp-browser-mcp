@@ -8,6 +8,7 @@
 import type { ToolRegistry } from './registry.js';
 import type { ServerContext, ToolResult, NetworkRequestEntry, DownloadEntry } from '../types.js';
 import { TempFileManager } from '../utils/temp-files.js';
+import { isMethodMissingError } from '../connection/capabilities.js';
 import { join } from 'path';
 import { defineTool } from './base-tool.js';
 import { ok, fail } from '../utils/helpers.js';
@@ -245,6 +246,56 @@ async function handlePerformance(
   return ok(`Performance Metrics:\n\n${lines.join('\n')}`);
 }
 
+async function handleMemory(
+  ctx: ServerContext,
+  params: Record<string, unknown>,
+): Promise<ToolResult> {
+  const sess = params._sessionId as string;
+  const skipped: string[] = [];
+  try { await ctx.sendCommand('Memory.enable', {}, sess); } catch { /* best-effort */ }
+
+  const readCounters = async (): Promise<Record<string, number>> => {
+    const r = (await ctx.sendCommand('Memory.getDOMCounters', {}, sess)) as Record<string, unknown>;
+    return {
+      documents: r.documents as number,
+      nodes: r.nodes as number,
+      jsEventListeners: r.jsEventListeners as number,
+    };
+  };
+
+  try {
+    const before = await readCounters();
+    try {
+      await ctx.sendCommand('Memory.prepareForLeakDetection', {}, sess);
+    } catch (err: unknown) {
+      if (isMethodMissingError(err)) throw err;
+      skipped.push(`prepareForLeakDetection: ${(err as Error).message}`);
+    }
+    const after = await readCounters();
+    const delta = {
+      documents: after.documents - before.documents,
+      nodes: after.nodes - before.nodes,
+      jsEventListeners: after.jsEventListeners - before.jsEventListeners,
+    };
+    const result: Record<string, unknown> = { before, after, delta };
+    try {
+      const leak = (await ctx.sendCommand('Memory.getDOMCountersForLeakDetection', {}, sess)) as { counters?: Array<{ name: string; count: number }> };
+      if (Array.isArray(leak.counters) && leak.counters.length > 0) {
+        result.leakDetectors = leak.counters.slice(0, 50);
+      }
+    } catch {
+      skipped.push('getDOMCountersForLeakDetection');
+    }
+    if (skipped.length > 0) result.skipped = skipped;
+    return ok(result);
+  } catch (err: unknown) {
+    if (isMethodMissingError(err)) {
+      return fail('Memory domain is not supported on this browser. DOM/memory counters require a Chromium-based browser with the Memory CDP domain.');
+    }
+    throw err;
+  }
+}
+
 async function handleDownloads(
   ctx: ServerContext,
   params: Record<string, unknown>,
@@ -342,6 +393,7 @@ export function registerObserveTools(
         '- network: List captured network requests with URLs, methods, status codes, and timing (requires: tabId; optional: filter — URL substring, types — resource type filter array, last, clear)',
         '- request: Get the full request and response body for a specific network request (requires: tabId; provide either requestId — from network listing — or urlFilter — substring of the URL; urlFilter resolves to the most recent matching request)',
         '- performance: Collect page performance metrics including DOM size, JS heap, layout counts, and paint timing (requires: tabId)',
+        '- memory: DOM/JS memory counters (documents, nodes, JS event listeners) before/after a forced GC sweep via Memory.prepareForLeakDetection, plus leak-detection counters when supported (requires: tabId)',
         '- downloads: List tracked file downloads with progress info (requires: tabId; optional: last, clear)',
         '- har: Export captured network requests as HAR 1.2 JSON (requires: tabId)',
         '',
@@ -355,7 +407,7 @@ export function registerObserveTools(
       inputSchema: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['console', 'network', 'request', 'performance', 'downloads', 'har'], description: 'Observe action.' },
+          action: { type: 'string', enum: ['console', 'network', 'request', 'performance', 'memory', 'downloads', 'har'], description: 'Observe action.' },
           tabId: { type: 'string', description: 'Tab ID.' },
           level: { type: 'string', enum: ['all', 'error', 'warning', 'log', 'info', 'debug'], description: 'Console level filter.' },
           filter: { type: 'string', description: 'Network URL filter.' },
@@ -377,9 +429,10 @@ export function registerObserveTools(
           case 'network':     return handleNetwork(ctx, params);
           case 'request':     return handleRequest(ctx, params);
           case 'performance': return handlePerformance(ctx, params);
+          case 'memory':      return handleMemory(ctx, params);
           case 'downloads':   return handleDownloads(ctx, params);
           case 'har':         return handleHar(ctx, params);
-          default:            return fail(`Unknown observe action: "${action}". Use: console, network, request, performance, downloads, har`);
+          default:            return fail(`Unknown observe action: "${action}". Use: console, network, request, performance, memory, downloads, har`);
         }
       },
     }),
