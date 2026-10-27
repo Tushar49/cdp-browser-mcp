@@ -246,47 +246,96 @@ async function handlePerformance(
   return ok(`Performance Metrics:\n\n${lines.join('\n')}`);
 }
 
+/** Bounded wait - never rejects; { ok: false } on timeout or error. */
+function raceBounded<T>(p: Promise<T>, ms: number): Promise<{ ok: boolean; value?: T }> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve({ ok: false }), ms);
+    p.then((v) => { clearTimeout(t); resolve({ ok: true, value: v }); }).catch(() => { clearTimeout(t); resolve({ ok: false }); });
+  });
+}
+
+/**
+ * B5: DOM/memory counters. Memory.getDOMCounters + a forced GC sweep
+ * (prepareForLeakDetection) when the browser answers; falls back to the
+ * Performance.getMetrics counters (Documents/Nodes/JSEventListeners) when
+ * the Memory domain is missing or unresponsive. Every Memory call is
+ * bounded so an unresponsive domain degrades in seconds instead of
+ * deadlocking the tool call.
+ */
 async function handleMemory(
   ctx: ServerContext,
   params: Record<string, unknown>,
 ): Promise<ToolResult> {
   const sess = params._sessionId as string;
+  const BOUND_MS = Math.max(1, (params._boundMs as number) || 5_000);
   const skipped: string[] = [];
-  try { await ctx.sendCommand('Memory.enable', {}, sess); } catch { /* best-effort */ }
-
-  const readCounters = async (): Promise<Record<string, number>> => {
-    const r = (await ctx.sendCommand('Memory.getDOMCounters', {}, sess)) as Record<string, unknown>;
-    return {
-      documents: r.documents as number,
-      nodes: r.nodes as number,
-      jsEventListeners: r.jsEventListeners as number,
-    };
-  };
 
   try {
-    const before = await readCounters();
-    try {
-      await ctx.sendCommand('Memory.prepareForLeakDetection', {}, sess);
-    } catch (err: unknown) {
-      if (isMethodMissingError(err)) throw err;
-      skipped.push(`prepareForLeakDetection: ${(err as Error).message}`);
-    }
-    const after = await readCounters();
-    const delta = {
-      documents: after.documents - before.documents,
-      nodes: after.nodes - before.nodes,
-      jsEventListeners: after.jsEventListeners - before.jsEventListeners,
+    const enable = await raceBounded(ctx.sendCommand('Memory.enable', {}, sess), BOUND_MS);
+    if (!enable.ok) skipped.push('Memory.enable (unsupported or timed out)');
+
+    const readMem = async (): Promise<Record<string, number> | null> => {
+      const r = await raceBounded(ctx.sendCommand('Memory.getDOMCounters', {}, sess), BOUND_MS);
+      if (!r.ok || !r.value) return null;
+      const v = r.value as Record<string, unknown>;
+      return {
+        documents: v.documents as number,
+        nodes: v.nodes as number,
+        jsEventListeners: v.jsEventListeners as number,
+      };
     };
-    const result: Record<string, unknown> = { before, after, delta };
-    try {
-      const leak = (await ctx.sendCommand('Memory.getDOMCountersForLeakDetection', {}, sess)) as { counters?: Array<{ name: string; count: number }> };
-      if (Array.isArray(leak.counters) && leak.counters.length > 0) {
-        result.leakDetectors = leak.counters.slice(0, 50);
+
+    let counters: Record<string, number> | null = await readMem();
+    const result: Record<string, unknown> = {};
+
+    if (counters) {
+      result.source = 'Memory.getDOMCounters';
+      const sweep = await raceBounded(ctx.sendCommand('Memory.prepareForLeakDetection', {}, sess), BOUND_MS);
+      if (!sweep.ok) skipped.push('prepareForLeakDetection (unsupported or timed out)');
+      const after = await readMem();
+      if (after) {
+        result.gc = {
+          before: counters,
+          after,
+          delta: {
+            documents: (after.documents ?? 0) - (counters.documents ?? 0),
+            nodes: (after.nodes ?? 0) - (counters.nodes ?? 0),
+            jsEventListeners: (after.jsEventListeners ?? 0) - (counters.jsEventListeners ?? 0),
+          },
+        };
+        counters = after;
       }
-    } catch {
-      skipped.push('getDOMCountersForLeakDetection');
+      const leak = await raceBounded(ctx.sendCommand('Memory.getDOMCountersForLeakDetection', {}, sess), BOUND_MS);
+      if (leak.ok && leak.value) {
+        const cs = (leak.value as { counters?: Array<{ name: string; count: number }> }).counters;
+        if (Array.isArray(cs) && cs.length > 0) result.leakDetectors = cs.slice(0, 50);
+      } else {
+        skipped.push('getDOMCountersForLeakDetection');
+      }
+    } else {
+      // Memory domain unresponsive - fall back to Performance metrics counters
+      skipped.push('Memory.getDOMCounters (unsupported or unresponsive)');
+      try {
+        const perf = (await ctx.sendCommand('Performance.getMetrics', {}, sess)) as Record<string, unknown>;
+        const m = (perf.metrics ?? []) as Array<{ name: string; value: number }>;
+        const pick = (n: string): number | null => m.find(x => x.name === n)?.value ?? null;
+        counters = {
+          documents: pick('Documents'),
+          nodes: pick('Nodes'),
+          jsEventListeners: pick('JSEventListeners'),
+        } as Record<string, number>;
+        result.source = 'Performance.getMetrics (Memory domain unresponsive - no GC sweep)';
+      } catch {
+        counters = null;
+        skipped.push('Performance.getMetrics fallback');
+      }
     }
+
+    if (counters) result.counters = counters;
     if (skipped.length > 0) result.skipped = skipped;
+    if (!counters) {
+      return fail('Memory counters unavailable on this browser (Memory and Performance domains both unresponsive).');
+    }
     return ok(result);
   } catch (err: unknown) {
     if (isMethodMissingError(err)) {
@@ -295,7 +344,6 @@ async function handleMemory(
     throw err;
   }
 }
-
 async function handleDownloads(
   ctx: ServerContext,
   params: Record<string, unknown>,
