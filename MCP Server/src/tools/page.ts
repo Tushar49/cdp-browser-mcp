@@ -663,14 +663,23 @@ async function handlePdf(ctx: ServerContext, args: PageArgs): Promise<ToolResult
 async function handleDialog(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
 
-  // TODO: Wire pendingDialogs state when session management is integrated
+  // Surface pending dialog context from the event pipeline when available
+  const pending = ctx.pendingDialogs.get(sess)?.slice(-1)[0];
   const accept = args.accept !== undefined ? args.accept : true;
   const dialogParams: Record<string, unknown> = { accept };
   if (args.text !== undefined) dialogParams.promptText = args.text;
 
-  await ctx.sendCommand('Page.handleJavaScriptDialog', dialogParams, sess);
+  try {
+    await ctx.sendCommand('Page.handleJavaScriptDialog', dialogParams, sess);
+  } catch (err) {
+    throw new Error(
+      `No JavaScript dialog is open on this tab${pending ? ' (stale pending state: ' + pending.message + ')' : ''}. ` +
+        `Pending dialogs are auto-accepted after a timeout; re-run the action that opened it, then handle within that window.`
+    );
+  }
 
-  return ok(`Dialog handled. Action: ${accept ? 'accepted' : 'dismissed'}${args.text ? ` with text: "${args.text}"` : ''}`);
+  ctx.pendingDialogs.delete(sess);
+  return ok(`Dialog handled. Action: ${accept ? 'accepted' : 'dismissed'}${args.text ? ` with text: "${args.text}"` : ''}${pending ? ` (was: ${pending.type}: ${pending.message})` : ''}`);
 }
 
 async function handleInject(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
