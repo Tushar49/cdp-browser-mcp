@@ -298,12 +298,12 @@ When a connection fails, the server auto-detects the failure mode and prints the
 | Tool | Actions | Description |
 |------|---------|-------------|
 | `tabs` | 7 | Tab management — list, find, open, close, activate, info, set profile |
-| `page` | 15 | Navigation, snapshots, screenshots, content extraction, PDF, dialogs, frames |
+| `page` | 20 | Navigation, snapshots, screenshots, content extraction, PDF, dialogs, frames, find-in-page, screen recording |
 | `interact` | 12 | Click, hover, type, fill, select, press, drag, scroll, upload, focus, check, tap |
 | `form` | 3 | Smart form filling engine — fill, read, clear; handles text, combobox, checkbox, radio, select, date in one call |
 | `execute` | 3 | JavaScript evaluation — expressions, async scripts, element-scoped calls |
-| `observe` | 6 | Console messages, network requests, performance metrics, downloads, HAR export |
-| `emulate` | 15 | Viewport, color scheme, geolocation, network throttling, timezone, vision deficiency |
+| `observe` | 7 | Console messages, network requests, performance metrics, memory counters, downloads, HAR export |
+| `emulate` | 15 | Viewport, color scheme, geolocation, network throttling, timezone, vision deficiency, device posture, CPU performance tier |
 | `storage` | 9 | Cookie CRUD, localStorage/sessionStorage management, storage clearing, quota inspection |
 | `intercept` | 6 | HTTP request interception — mock, modify, block network requests |
 | `cleanup` | 7 | Session management, disconnect, temp file cleanup, reset |
@@ -347,6 +347,8 @@ When a connection fails, the server auto-detects the failure mode and prints the
 | `add_style` | Inject CSS (inline or external URL) | `tabId`, `css` or `cssUrl` | `persistent` |
 | `bypass_csp` | Disable Content Security Policy | `tabId` | `enabled` |
 | `frames` | List all frames with id, URL, origin, depth (same-origin + OOP iframes) | `tabId` | — |
+| `find` / `find_next` / `find_stop` | Find text in page, cycle matches with wrap-around, stop (counts visible matches; `window.find` skips hidden text) | `tabId`, `text` (find) | `caseSensitive` |
+| `record_start` / `record_stop` | Record the tab screen to a webm (experimental, recent Chromium only) | `tabId` | `audio`, `path` (stop) |
 
 ### `interact` — Element Interaction
 
@@ -402,6 +404,7 @@ Fill entire forms in a single call. Auto-detects field types and handles framewo
 | `network` | List network requests | `tabId` | `filter`, `types`, `last`, `clear` |
 | `request` | Get full request/response body | `tabId`, `requestId` | — |
 | `performance` | DOM size, JS heap, layout metrics | `tabId` | — |
+| `memory` | DOM/JS memory counters before/after a forced GC sweep (Performance fallback when the Memory domain is unresponsive) | `tabId` | — |
 | `downloads` | List tracked file downloads | `tabId` | `last`, `clear` |
 | `har` | Export captured network data as HAR 1.2 JSON | `tabId` | — |
 
@@ -425,6 +428,8 @@ Set any combination of properties in a single call:
 | `extraHeaders` | Set custom headers | object |
 | `autoDarkMode` | Force automatic dark mode | boolean |
 | `idle` | Emulate idle/locked screen state | `active`, `locked` |
+| `devicePosture` | Foldable device posture (Chrome 153+) | `continuous`, `folded` |
+| `cpuPerformance` | CPU performance tier (Chrome 153/154+) | `low`, `mid`, `high`, `ultra` |
 | `reset` | Clear all overrides | `true` |
 
 ### `storage` — Cookie & Storage Management
