@@ -2,6 +2,11 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- repo-infra: the "Promote dev to main" workflow now verifies the promote commit carries no dev-only material BEFORE pushing (hard fail instead of a log line), and the agent guide documents the concrete manual-flow verification plus a "never tag past a red Guard main" rule — both learned from the v5.1.0 release race. No package changes.
+
 ## [5.1.0] - 2026-10-27
 
 ### Added

@@ -121,15 +121,26 @@ Never:
   so it never lands on main. If dev adds a *shared* rule, it belongs in
   `.main.gitignore`. `guard-main.yml` fails if `.main.gitignore` reappears
   on main.
-- **Promote flow (dev → main):** Actions → "Promote dev to main" workflow,
+- **Promote flow (dev → main):** Actions → "Promote dev to main" workflow
+  (preferred — it hard-fails before push if dev-only paths survive),
   or manually: `git merge --no-ff --no-commit origin/dev` →
   sync `.gitignore` from `.main.gitignore` when it changed →
   `git rm -r _archive .research .githooks .main.gitignore .github/AGENTS.md .github/copilot-instructions.md`
-  → restore main's `.gitignore` → verify `git status` shows no strays →
+  → restore main's `.gitignore` → **hard-verify before committing:**
+  `git ls-files _archive .research .githooks .main.gitignore .github/AGENTS.md .github/copilot-instructions.md`
+  must print NOTHING, and `git status --short` must show no `_archive`/
+  `.research` lines (watch for ` D` entries — files tracked in the merge
+  but missing on disk mean the strip didn't take) →
   commit `Merge dev → main: <version>`. `.gitignore` alone never blocks a
   merge (it only affects untracked files) — deletion is explicit, policy
   second. New files added on dev since the last promote land silently on
-  merge; the promote script and `git status` check catch them.
+  merge (the v5.1.0 promote shipped two `_archive` files this way) — the
+  promote workflow's pre-push check and `guard-main.yml` are the backstops.
+- **Guard main red on a promote merge = HARD blocker:** strip the paths,
+  re-push main, and only then tag/release. v5.1.0's first tag shipped from
+  a guard-failing commit because the red X was missed while racing the
+  release — the tag had to be deleted and re-pointed (which demoted the
+  GitHub Release to a draft). Never tag past a red guard.
 - **Reference duty:** files that ship to main (README, CONTRIBUTING,
   extension docs, changelogs) must not reference dev-only paths
   (`_archive/`, `.research/`, agent scratch). Point at the concept

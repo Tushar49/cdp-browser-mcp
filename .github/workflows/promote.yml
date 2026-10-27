@@ -73,9 +73,17 @@ jobs:
         run: |
           git rm -r -q _archive .research .githooks .main.gitignore \
             .github/AGENTS.md .github/copilot-instructions.md 2>/dev/null || true
-          echo "── remaining tracked dev-paths (must be empty) ──"
-          git ls-files "_archive" ".research" ".githooks" ".main.gitignore" \
-            ".github/AGENTS.md" ".github/copilot-instructions.md"
+          # git rm must not fail silently (e.g. it aborts as a unit when it
+          # hits an oddity) — verify the strip actually emptied the index.
+          leaks=$(git ls-files "_archive" ".research" ".githooks" ".main.gitignore" \
+            ".github/AGENTS.md" ".github/copilot-instructions.md")
+          if [ -n "$leaks" ]; then
+            echo "❌ dev-only paths survived the strip (git rm failed partway):"
+            echo "$leaks"
+            echo "Fix: resolve leftovers by hand, then re-run the workflow."
+            exit 1
+          fi
+          echo "✅ no dev-only paths tracked in the merge index."
           echo "── working-tree check ──"
           git status --short
           test ! -e _archive
@@ -94,7 +102,7 @@ jobs:
           fi
           echo "✅ No residual conflicts."
 
-      - name: Commit and push to main
+      - name: Commit
         run: |
           git status --short
           if git diff --cached --quiet; then
@@ -102,4 +110,26 @@ jobs:
           else
             git commit -m "Merge dev → main: ${{ inputs.version }}"
           fi
-          git push origin HEAD:main
+
+      - name: Verify the promote commit is clean (hard fail BEFORE push)
+        run: |
+          # Same check as guard-main.yml, run here so a stray never pushes:
+          # guard runs after the fact, and a red X is easy to miss when a
+          # release tag is racing right behind the push.
+          leak=""
+          for p in "_archive" ".research" ".githooks" ".main.gitignore" ".github/AGENTS.md" ".github/copilot-instructions.md"; do
+            n=$(git ls-files "$p" | wc -l)
+            if [ "$n" -gt 0 ]; then
+              echo "❌ FORBIDDEN in the promote commit: $p ($n file(s))"
+              git ls-files "$p"
+              leak=1
+            fi
+          done
+          if [ -n "$leak" ]; then
+            echo "Not pushing. Strip the paths and re-run the workflow."
+            exit 1
+          fi
+          echo "✅ promote commit carries no dev-only paths."
+
+      - name: Push to main
+        run: git push origin HEAD:main
