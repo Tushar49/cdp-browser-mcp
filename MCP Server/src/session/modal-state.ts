@@ -63,6 +63,11 @@ export class ModalStateManager {
     this.modals.delete(tabId);
   }
 
+  /** Drop every modal state (tab destroyed, browser disconnected/restarted). */
+  clearAll(): void {
+    this.modals.clear();
+  }
+
   /** Get the active modal for a tab, or undefined if none. */
   getModal(tabId: string): ModalState | undefined {
     return this.modals.get(tabId);

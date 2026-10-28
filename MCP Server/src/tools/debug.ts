@@ -395,7 +395,7 @@ export function registerDebugTools(
           cleanupStrategy: { type: 'string', enum: ['close', 'detach', 'none'], description: 'Tab cleanup on session expiry.' },
           exclusive: { type: 'boolean', description: 'Lock tab to this session (default: true).' },
         },
-        required: ['action', 'tabId'],
+        required: ['action'],
       },
       handler: async (ctx, params) => {
         const action = params.action as string;

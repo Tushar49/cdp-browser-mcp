@@ -17,6 +17,7 @@
  * (wired in index.ts next to the other per-connection caches).
  */
 import type { CDPClient } from './cdp-client.js';
+import { DomainUnsupportedError } from '../utils/error-handler.js';
 
 /** Domains whose absence is worth surfacing in `status` output. */
 export const NOTABLE_DOMAINS = [
@@ -124,12 +125,12 @@ export class DomainCapabilities {
   async require(client: CDPClient, key: string, minChrome?: string, sessionId?: string): Promise<void> {
     if (await this.has(client, key, sessionId)) return;
     const versionNote = minChrome ? ` (requires Chrome ${minChrome}+)` : '';
-    const err = new Error(
+    throw new DomainUnsupportedError(
       `This browser does not support the CDP "${key}" feature${versionNote}. ` +
         `Update Chrome/Brave or use a feature-gated alternative.`,
+      key,
+      minChrome,
     );
-    err.name = 'DomainUnsupportedError';
-    throw err;
   }
 
   /** Invalidate on disconnect/reconnect. */

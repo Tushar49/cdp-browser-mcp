@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ActionableError, Errors, wrapError } from '../../utils/error-handler.js';
+import { ActionableError, DomainUnsupportedError, Errors, wrapError } from '../../utils/error-handler.js';
 
 describe('ActionableError', () => {
   it('has message, fix, context properties', () => {
@@ -122,6 +122,19 @@ describe('wrapError()', () => {
     const original = new ActionableError('original', 'fix');
     const wrapped = wrapError(original);
     expect(wrapped).toBe(original);
+  });
+
+  it('converts DomainUnsupportedError into an actionable error with fix + context', () => {
+    const original = new DomainUnsupportedError(
+      'This browser does not support the CDP "WebAuthn" feature (requires Chrome 150+).',
+      'WebAuthn',
+      '150',
+    );
+    const wrapped = wrapError(original);
+    expect(wrapped).toBeInstanceOf(ActionableError);
+    expect(wrapped.message).toContain('WebAuthn');
+    expect(wrapped.fix).toContain('Update Chrome/Brave');
+    expect(wrapped.context).toEqual({ domain: 'WebAuthn', minChrome: '150' });
   });
 
   it('maps "No target with given id" to targetDetached', () => {

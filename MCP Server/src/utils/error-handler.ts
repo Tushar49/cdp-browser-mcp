@@ -30,6 +30,26 @@ export class ActionableError extends Error {
   }
 }
 
+// ─── Domain-unsupported error (capability gate) ─────────────────────
+
+/**
+ * Thrown by `DomainCapabilities.require` when the connected browser does not
+ * implement a CDP domain/method (e.g. Brave/Chrome builds that omit a domain).
+ * `wrapError` recognizes it so unsupported-feature failures render with a
+ * proper "How to fix" instead of the generic fallback.
+ */
+export class DomainUnsupportedError extends Error {
+  public readonly domain: string;
+  public readonly minChrome?: string;
+
+  constructor(message: string, domain: string, minChrome?: string) {
+    super(message);
+    this.name = 'DomainUnsupportedError';
+    this.domain = domain;
+    this.minChrome = minChrome;
+  }
+}
+
 // ─── Error Catalog ──────────────────────────────────────────────────
 
 export const Errors = {
@@ -61,6 +81,23 @@ export const Errors = {
       `Tab [${tabId}] not found — it may have been closed or the session expired.`,
       "Use the tabs tool (action: 'list') to see available tabs, then retry with a valid tabId.",
       { tabId },
+    );
+  },
+
+  /** No page tabs are open at all (auto-resolve path, 5.2 E5). */
+  noOpenTabs(): ActionableError {
+    return new ActionableError(
+      'No browser tabs are open.',
+      'Open a tab: tabs({ action: "new", url: "https://example.com" }) — or open one in the browser normally and retry.',
+    );
+  },
+
+  /** tabId omitted while multiple tabs are open (auto-resolve path, 5.2 E5). */
+  tabIdRequired(sampleTabId: string, reason: string, tabList: string): ActionableError {
+    return new ActionableError(
+      `${reason}`,
+      `Pass tabId — e.g. tabId: "${sampleTabId}". Open tabs:\n${tabList}`,
+      { openTabs: tabList.split('\n').length },
     );
   },
 
@@ -236,6 +273,42 @@ export const Errors = {
     );
   },
 
+  /** WebAuthn: an authenticatorId is not (or no longer) registered on this server. */
+  authenticatorNotFound(authenticatorId: string, known: string[]): ActionableError {
+    return new ActionableError(
+      `Unknown authenticator "${authenticatorId.slice(0, 12)}…". It was never created by this server, or its tab was closed (authenticator registry entry dropped).`,
+      known.length
+        ? `Known authenticators: ${known.join(', ')}\nCreate a new one: webauthn({ action: "add_authenticator", tabId })`
+        : 'No virtual authenticators exist yet. Create one: webauthn({ action: "add_authenticator", tabId })',
+      { authenticatorId: authenticatorId.slice(0, 24), known: known.map((k) => k.slice(0, 24)) },
+    );
+  },
+
+  /** WebAuthn: a base64 binary parameter is malformed. */
+  invalidBase64(field: string): ActionableError {
+    return new ActionableError(
+      `Parameter "${field}" is not valid base64.`,
+      'CDP binary fields accept base64 (standard or URL-safe alphabet, padding optional):\n' +
+        `• privateKey: PKCS#8 DER of an ECDSA P-256 key, base64-encoded\n` +
+        '• credentialId / userHandle / largeBlob: raw bytes, base64-encoded\n' +
+        'Generate a PKCS#8 key: node -e "console.log(require(\'crypto\').generateKeyPairSync(\'ec\',{namedCurve:\'P-256\'}).privateKey.export({type:\'pkcs8\',format:\'der\'}).toString(\'base64\'))"',
+      { field },
+    );
+  },
+
+  /** WebAuthn: Chromium allows only one internal-transport authenticator per environment. */
+  internalAuthenticatorConflict(existing: string[]): ActionableError {
+    return new ActionableError(
+      'Chrome only supports one internal authenticator per environment (the default transport).',
+      existing.length
+        ? `Existing internal authenticators: ${existing.join(', ')}\n` +
+          'Either use set_user_verified / set_override_bits on the existing one, remove it first ' +
+          '(webauthn({ action: "remove_authenticator", authenticatorId })), or create a non-internal transport (e.g. transport: "usb").'
+        : 'Create a non-internal transport authenticator instead (e.g. transport: "usb").',
+      { existingInternal: existing.map((k) => k.slice(0, 24)) },
+    );
+  },
+
   /** File chooser dialog was not triggered in time. */
   fileChooserTimeout(timeoutMs: number): ActionableError {
     return new ActionableError(
@@ -258,6 +331,13 @@ export const Errors = {
  */
 export function wrapError(error: unknown): ActionableError {
   if (error instanceof ActionableError) return error;
+  if (error instanceof DomainUnsupportedError) {
+    return new ActionableError(
+      error.message,
+      'Update Chrome/Brave to a version that supports this feature, or use a different browser for this capability.',
+      { domain: error.domain, minChrome: error.minChrome },
+    );
+  }
 
   const msg = error instanceof Error ? error.message : String(error);
 

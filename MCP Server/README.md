@@ -1,7 +1,7 @@
 # CDP Browser MCP Server
 
 Connects AI agents to your **real running Chrome** — your cookies, logins, and
-extensions stay intact. 14 tools / 90+ actions over the Chrome DevTools
+extensions stay intact. 15 tools / 100+ actions over the Chrome DevTools
 Protocol: navigation, accessibility snapshots, element interaction, smart form
 filling, network interception, device emulation, cookies/storage, and a full
 JS debugger.
