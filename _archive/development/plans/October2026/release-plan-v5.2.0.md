@@ -376,7 +376,7 @@ on the demo RP, `dismiss` + `reset_cooldown`, pre-attach-dialog recovery.
 | 6 | WS2 `fedcm` state + tool + tests + live | **cut with WS2** | — |
 | 7 | WS3 hygiene commits | 0.5 | live spot-checks |
 | 8 | WS4 intercept promotion (optional) | **done 2026-10-28** | E2E pass (pause→list→fulfill→mocked body rendered); 2 live-caught bugs fixed (dead list store; stale-session no-pause) |
-| 9 | Release: bump → promote (workflow!) → tag `v5.2.0` | 0.5 | pipeline |
+| 9 | Release: bump → promote (workflow!) → tag `v5.2.0` | **done 2026-10-28** | pipeline |
 
 Totals: **≈5.0 sessions** (WS2 killed; E4/WS1/live done in-cycle). Interim commits after every item (conventional
 commits, CHANGELOG [Unreleased] accumulates; test baseline counts from
@@ -419,3 +419,19 @@ workstream breaks AFTER promote: revert its commits on main, re-push
 (Guard re-verifies), tag never moves backward — a broken 5.2.0 tag
 follows the 5.1.0 precedent (delete + re-point BEFORE publishing, and
 publish the GitHub Release only after the guard is green).
+
+## RELEASED — 2026-10-28 (v5.2.0 shipped)
+
+- npm `latest: 5.2.0` (Release workflow run #40638404161: success, OIDC
+  publish — the duplicate-version rejection that cost a rerun in 5.1.0
+  did not recur).
+- Promote: the workflow FAILED by design on the first attempt (leak
+  check fired — see the promote.yml fix commit `91a7afb` for the full
+  diagnosis: bare `git rm` aborts as a unit when a pathspec matches
+  nothing and `2>/dev/null || true` hid the fatal; a modify/delete
+  conflict on a 5.1-stray researched README also required `-f`).
+  Promoted manually per the sanctioned flow at `f51c8bf` carrying the
+  workflow fix; Guard main + build-and-test (20/22) all green before
+  the tag.
+- Tag `v5.2.0` on `f51c8bf`; tests at release: 394.
+- GitHub Release: published by the user.
