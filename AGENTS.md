@@ -125,7 +125,11 @@ Never:
   (preferred — it hard-fails before push if dev-only paths survive),
   or manually: `git merge --no-ff --no-commit origin/dev` →
   sync `.gitignore` from `.main.gitignore` when it changed →
-  `git rm -r _archive .research .githooks .main.gitignore .github/AGENTS.md .github/copilot-instructions.md`
+  `git rm -rf --ignore-unmatch _archive .research .githooks .main.gitignore .github/AGENTS.md .github/copilot-instructions.md`
+  (bare `git rm -r` aborts as a unit when a pathspec matches nothing — e.g.
+  dev tracks no `.research` — and without `-f` it refuses
+  modify/delete-conflicted strays; both stranded files in the v5.2.0
+  promote attempt)
   → restore main's `.gitignore` → **hard-verify before committing:**
   `git ls-files _archive .research .githooks .main.gitignore .github/AGENTS.md .github/copilot-instructions.md`
   must print NOTHING, and `git status --short` must show no `_archive`/

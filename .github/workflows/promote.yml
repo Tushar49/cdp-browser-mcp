@@ -71,8 +71,15 @@ jobs:
 
       - name: Strip dev-only material (explicit — .gitignore cannot do this)
         run: |
-          git rm -r -q _archive .research .githooks .main.gitignore \
-            .github/AGENTS.md .github/copilot-instructions.md 2>/dev/null || true
+          # -f: force-remove modify/delete-conflicted entries (dev changed a
+          # stray that main deleted). --ignore-unmatch: don't abort the whole
+          # command when a pathspec matches nothing (dev doesn't always track
+          # .research/.github/AGENTS.md — a bare git rm aborts as a unit and
+          # the 2>/dev/null || true wrapper used to hide the fatal, which
+          # stranded every match in the index; caught live on the v5.2.0
+          # promote).
+          git rm -rf -q --ignore-unmatch _archive .research .githooks .main.gitignore \
+            .github/AGENTS.md .github/copilot-instructions.md
           # git rm must not fail silently (e.g. it aborts as a unit when it
           # hits an oddity) — verify the strip actually emptied the index.
           leaks=$(git ls-files "_archive" ".research" ".githooks" ".main.gitignore" \
