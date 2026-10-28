@@ -49,5 +49,11 @@ export function loadConfig(): ServerConfig {
     autoWait: process.env.CDP_AUTO_WAIT !== 'false',
 
     slimMode: process.env.CDP_SLIM_MODE === 'true',
+
+    /** Opt-in origin allow-list for tab-bound tool calls (5.3 WS1 O3). */
+    allowedOrigins: (process.env.CDP_ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }

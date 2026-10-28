@@ -305,7 +305,13 @@ async function handleExportState(
   }
 
   const json = JSON.stringify(state, null, 2);
-  return ok('Storage state (' + cookies.length + ' cookie(s), ' + origins.length + ' origin(s), ' + Object.keys(localStorage).length + ' localStorage key(s)).\nPass this object as `state` to storage.import_state to restore:\n\n' + json);
+  // 5.3 WS1 O2: exempt from the dispatch secrets scrubber — export_state's
+  // whole job is exporting auth state (tokens/keys in localStorage would be
+  // masked and made useless for import_state).
+  return {
+    ...ok('Storage state (' + cookies.length + ' cookie(s), ' + origins.length + ' origin(s), ' + Object.keys(localStorage).length + ' localStorage key(s)).\nPass this object as `state` to storage.import_state to restore:\n\n' + json),
+    _noScrub: true,
+  };
 }
 
 async function handleImportState(

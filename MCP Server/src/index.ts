@@ -41,6 +41,7 @@ import { SnapshotCache } from './snapshot/cache.js';
 import { ToolRegistry } from './tools/registry.js';
 import { preprocessToolCall } from './tools/dispatch.js';
 import { defineTool, success } from './tools/base-tool.js';
+import { listTools } from './tools/list-tools.js';
 import { ActionableError, wrapError } from './utils/error-handler.js';
 import type { ServerContext, FileChooserHandler } from './types.js';
 
@@ -535,6 +536,7 @@ registry.register(
   defineTool({
     name: 'ping',
     description: 'Health check. Returns server version and connection status.',
+    annotations: { readOnlyHint: true },
     inputSchema: { type: 'object', properties: {} },
     handler: async () =>
       success(
@@ -548,6 +550,7 @@ registry.register(
   defineTool({
     name: 'status',
     description: 'Server status: connection, config, sessions.',
+    annotations: { readOnlyHint: true },
     inputSchema: { type: 'object', properties: {} },
     handler: async () => {
       const lines = [
@@ -649,9 +652,7 @@ CALLING CONVENTION (critical): every tool is ONE tool with an action enum parame
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: config.slimMode
-    ? registry.list().filter(t => t.name.startsWith('browser_') || t.name === 'ping' || t.name === 'status')
-    : registry.list(),
+  tools: listTools(registry, config.slimMode),
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {

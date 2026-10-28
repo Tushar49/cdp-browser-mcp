@@ -69,6 +69,14 @@ export interface ServerConfig {
 
   /** If true, expose 6 slim tools instead of 15 full tools (for small-context models) */
   slimMode: boolean;
+
+  /**
+   * Opt-in origin allow-list (CDP_ALLOWED_ORIGINS, comma-separated). When
+   * non-empty, tab-bound tool calls may only target tabs whose origin is in
+   * the list; everything else fails with an actionable error. Empty (default)
+   * = unrestricted — today's behavior.
+   */
+  allowedOrigins: string[];
 }
 
 // ─── MCP Tool Result ────────────────────────────────────────────────
@@ -177,6 +185,20 @@ export interface ToolDefinition {
   description: string;
   inputSchema: Record<string, unknown>;
   handler: ToolHandler;
+  /**
+   * MCP tool annotations passed through to tools/list (5.3 WS1 O1).
+   * Only tool-level hints that are true for EVERY action of the tool —
+   * e.g. observe (all actions are reads) — not mixed-action tools.
+   */
+  annotations?: ToolAnnotations;
+}
+
+/** MCP tool annotations (subset the MCP spec defines as hints). */
+export interface ToolAnnotations {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  openWorldHint?: boolean;
+  [key: string]: unknown;
 }
 
 // ─── CDP Event Pipeline State ───────────────────────────────────────
