@@ -30,6 +30,18 @@ a red Guard main.
 
 ## WS0 — WebMCP live spike (GO/KILL gate — 0.25 session)
 
+**RESULT (2026-10-28): GO — outcome (a)-after-flags. Full E2E PASS:
+register → toolsAdded (replay + live) → invokeTool → toolResponded
+Completed with echoed output.** Spike record:
+`_archive/research/October2026/2026-10-28-ws0-webmcp-spike.md` (rig +
+probe scripts in `_archive/research/October2026/ws0-spike/`). Key
+corrections for WS3 below: the API lives at **`document.modelContext`**
+(navigator form deprecated 150+); registration via `registerTool`;
+Brave needs BOTH `#enable-webmcp-testing` + `#devtools-webmcp-support`
+flags (user-enabled, one-time — docs must name them); WS3's registry
+MUST subscribe to `toolsAdded` BEFORE calling `WebMCP.enable` (the
+replay event races the enable response).
+
 The FedCm lesson: a CDP domain can answer while the page-side JS API is
 dead. Before building the tool, verify the FULL path on Brave 153:
 1. `status` → confirm the WebMCP canary still answers (it did: 7/10).

@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>WS0 WebMCP spike rig</title></head>
+<body>
+<pre id="diag">running…</pre>
+<script>
+const diag = {};
+diag.ua = navigator.userAgent.slice(0, 80);
+const mc = document.modelContext ?? navigator.modelContext;
+diag.documentModelContext = 'modelContext' in document;
+diag.navigatorModelContext = 'modelContext' in navigator;
+diag.mcType = typeof mc;
+const method = !mc ? null
+  : typeof mc.registerTool === 'function' ? 'registerTool'
+  : typeof mc.provideTools === 'function' ? 'provideTools'
+  : null;
+diag.registerMethod = method;
+if (mc && method) {
+  try {
+    const tool = {
+      name: 'ws0_echo',
+      description: 'WS0 spike: echoes its input back verbatim',
+      inputSchema: { type: 'object', properties: { hello: { type: 'string' } } },
+      execute: (input) => ({ echo: input ?? null, at: new Date().toISOString() })
+    };
+    if (method === 'registerTool') mc.registerTool(tool); else mc.provideTools([tool]);
+    diag.registered = ['ws0_echo'];
+  } catch (e) {
+    diag.registerError = String(e);
+  }
+} else {
+  diag.registered = [];
+}
+window.__WS0DIAG = diag;
+document.getElementById('diag').textContent = JSON.stringify(diag, null, 2);
+</script>
+</body>
+</html>
