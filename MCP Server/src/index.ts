@@ -42,6 +42,7 @@ import { ToolRegistry } from './tools/registry.js';
 import { preprocessToolCall } from './tools/dispatch.js';
 import { defineTool, success } from './tools/base-tool.js';
 import { listTools } from './tools/list-tools.js';
+import { applyWebMcpEvent, clearWebMcpState } from './tools/webmcp.js';
 import { ActionableError, wrapError } from './utils/error-handler.js';
 import type { ServerContext, FileChooserHandler } from './types.js';
 
@@ -105,6 +106,7 @@ cdpClient.on('disconnected', () => {
   // dialog's event on re-attach, so kept entries would block tools forever.
   ctx.findState.clear();
   ctx.modalStates.clearAll();
+  clearWebMcpState(ctx);
   healthMonitor.onDisconnect().catch(() => {
     // Reconnect failed — next tool call will trigger autoConnect
   });
@@ -408,6 +410,14 @@ function wireEventPipeline(serverCtx: ServerContext): void {
         break;
       }
 
+      // ── WebMCP passthrough (5.3 WS3) ──
+      case 'WebMCP.toolsAdded':
+      case 'WebMCP.toolsRemoved':
+      case 'WebMCP.toolInvoked':
+      case 'WebMCP.toolResponded':
+        applyWebMcpEvent(serverCtx, event.method, sessionId, params);
+        break;
+
       // ── Debugger events ──
       case 'Debugger.paused': {
         const pauseTs = Date.now();
@@ -509,6 +519,8 @@ const ctx: ServerContext = {
   pendingFileChoosers: new Map(),
   pausedTabs: new Map(),
   pendingFetchRequests: new Map(),
+  webmcpTools: new Map(),
+  webmcpInvocations: new Map(),
 };
 
 // ─── Auto-connect with mutex (P0-2) ────────────────────────────────

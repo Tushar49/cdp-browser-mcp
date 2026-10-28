@@ -201,6 +201,23 @@ export interface ToolAnnotations {
   [key: string]: unknown;
 }
 
+// ─── WebMCP Passthrough State (5.3 WS3) ─────────────────────────────
+
+/** A page-registered WebMCP tool as delivered by CDP WebMCP.toolsAdded. */
+export interface WebMcpToolInfo {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+  frameId: string;
+  annotations?: Record<string, unknown>;
+}
+
+/** Pending WebMCP invocation awaiting its toolResponded event. */
+export interface WebMcpInvocation {
+  resolve: (response: { status: string; output?: unknown; errorText?: string; exceptionDescription?: string }) => void;
+  timer: NodeJS.Timeout;
+}
+
 // ─── CDP Event Pipeline State ───────────────────────────────────────
 
 /** Tracked network request entry. */
@@ -343,4 +360,15 @@ export interface ServerContext {
 
   /** Per-session pending fetch requests (sessionId → Map<requestId, info>). */
   pendingFetchRequests: Map<string, Map<string, FetchRequestInfo>>;
+
+  /**
+   * WebMCP page-registered tool registry (CDP sessionId → toolName → info),
+   * populated by the event pipeline from WebMCP.toolsAdded/toolsRemoved
+   * (5.3 WS3). Discovery is event-driven — the protocol has no listing
+   * method; WebMCP.enable replays currently-registered tools.
+   */
+  webmcpTools: Map<string, Map<string, WebMcpToolInfo>>;
+
+  /** Pending WebMCP invocations (invocationId → resolver), resolved by WebMCP.toolResponded. */
+  webmcpInvocations: Map<string, WebMcpInvocation>;
 }

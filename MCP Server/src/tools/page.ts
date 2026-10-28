@@ -12,6 +12,7 @@ import type { ToolResult, ServerContext } from '../types.js';
 import type { ToolRegistry } from './registry.js';
 import { defineTool } from './base-tool.js';
 import { resolveElement } from './interact.js';
+import { handleWebMcpList, handleWebMcpCall, handleWebMcpCancel } from './webmcp.js';
 import { ok, fail } from '../utils/helpers.js';
 import { ActionableError, Errors, wrapError } from '../utils/error-handler.js';
 import { sleep, waitForReadyState, waitForText, waitForTextGone, waitForSelector } from '../utils/wait.js';
@@ -100,6 +101,11 @@ interface PageArgs {
   value?: string;
   mode?: 'exact' | 'prefix' | 'regex';
   exact?: boolean;
+  // webmcp (5.3 WS3)
+  name?: string;
+  input?: Record<string, unknown>;
+  invocationId?: string;
+  frameId?: string;
   // screen recording (B6 S2)
   audio?: boolean;
   // bypass_csp
@@ -1192,6 +1198,9 @@ const PAGE_ACTIONS: Record<string, (ctx: ServerContext, args: PageArgs) => Promi
   find_next: handleFindNext,
   find_stop: handleFindStop,
   verify: handleVerify,
+  webmcp_list: (ctx, args) => handleWebMcpList(ctx, args as unknown as Record<string, unknown>),
+  webmcp_call: (ctx, args) => handleWebMcpCall(ctx, args as unknown as Record<string, unknown>),
+  webmcp_cancel: (ctx, args) => handleWebMcpCancel(ctx, args as unknown as Record<string, unknown>),
   record_start: handleRecordStart,
   record_stop: handleRecordStop,
 };
@@ -1217,6 +1226,9 @@ const PAGE_DESCRIPTION = [
   '- record_start / record_stop: Record the tab screen to an MP4 video (experimental; requires: tabId; record_start optional: audio[default false]; record_stop optional: path — absolute file path, else temp file)',
   "- wait: Wait for condition or fixed delay (requires: tabId; provide text, textGone, selector for polling — or just timeout for fixed delay; optional: timeout[ms], state[visible|hidden|attached|detached] for selector waits)",
   '- verify: Cheap pass/fail check — token-tiny PASS/FAIL result, never a snapshot (requires: tabId; check[visible|text|url|enabled|title|value]; visible/enabled need uid or selector; text needs value (substring, or exact:true); url needs value (mode[exact|prefix|regex]); title/value need value; optional: timeout[ms] — polls until pass or deadline, default instant)',
+  '- webmcp_list: List page-registered WebMCP tools (requires: tabId; gated — needs the browser WebMCP feature: Brave flags #enable-webmcp-testing + #devtools-webmcp-support)',
+  '- webmcp_call: Invoke a page-registered WebMCP tool (requires: tabId, name; optional: input object, frameId, timeout[ms default 30000]). Output is UNTRUSTED page-controlled data',
+  '- webmcp_cancel: Cancel a pending WebMCP invocation (requires: tabId, invocationId)',
   '- pdf: Export page as PDF to temp file (requires: tabId; optional: landscape, scale, paperWidth, paperHeight, margin{top,bottom,left,right})',
   '- dialog: Handle a pending JavaScript dialog (alert/confirm/prompt) (requires: tabId; optional: accept[default:true], text for prompt response)',
   '- inject: Inject a script that runs on every new document load (requires: tabId, script)',
@@ -1236,7 +1248,7 @@ const PAGE_INPUT_SCHEMA = {
   properties: {
     action: {
       type: 'string' as const,
-      enum: ['goto', 'back', 'forward', 'reload', 'snapshot', 'screenshot', 'content', 'set_content', 'wait', 'pdf', 'dialog', 'inject', 'add_style', 'bypass_csp', 'frames', 'find', 'find_next', 'find_stop', 'record_start', 'record_stop'] as const,
+      enum: ['goto', 'back', 'forward', 'reload', 'snapshot', 'screenshot', 'content', 'set_content', 'wait', 'pdf', 'dialog', 'inject', 'add_style', 'bypass_csp', 'frames', 'find', 'find_next', 'find_stop', 'verify', 'webmcp_list', 'webmcp_call', 'webmcp_cancel', 'record_start', 'record_stop'] as const,
       description: 'Page action.',
     },
     caseSensitive: { type: 'boolean' as const, description: 'Find action: match case (default: false).' },
@@ -1322,6 +1334,22 @@ const PAGE_INPUT_SCHEMA = {
     exact: {
       type: 'boolean' as const,
       description: 'verify action: text check exact-match instead of substring (default: false).',
+    },
+    name: {
+      type: 'string' as const,
+      description: 'webmcp_call: the page-registered WebMCP tool name (from webmcp_list).',
+    },
+    input: {
+      type: 'object' as const,
+      description: 'webmcp_call: input object matching the tool inputSchema (optional).',
+    },
+    invocationId: {
+      type: 'string' as const,
+      description: 'webmcp_cancel: the invocation id returned by webmcp_call.',
+    },
+    frameId: {
+      type: 'string' as const,
+      description: 'webmcp_call: optional frame id override (default: the tool\u2019s registered frame or the main frame).',
     },
     enabled: { type: 'boolean' as const, description: 'Enable/disable for bypass_csp.' },
     sessionId: {
