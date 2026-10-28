@@ -7,9 +7,9 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.0.3-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tools-14-green" alt="Tools">
-  <img src="https://img.shields.io/badge/sub--actions-90+-green" alt="Actions">
+  <a href="https://www.npmjs.com/package/cdp-mcp-server"><img src="https://img.shields.io/npm/v/cdp-mcp-server" alt="npm version"></a>
+  <img src="https://img.shields.io/badge/tools-15-green" alt="Tools">
+  <img src="https://img.shields.io/badge/sub--actions-120+-green" alt="Actions">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="License">
 </p>
