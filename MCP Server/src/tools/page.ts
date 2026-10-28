@@ -8,6 +8,7 @@
 
 import { writeFileSync } from 'fs';
 import { join, resolve, normalize } from 'path';
+import { decodeAnnotatedPageContent } from '../utils/proto-wire.js';
 import type { ToolResult, ServerContext } from '../types.js';
 import type { ToolRegistry } from './registry.js';
 import { defineTool } from './base-tool.js';
@@ -551,9 +552,17 @@ async function handleContent(ctx: ServerContext, args: PageArgs): Promise<ToolRe
       throw err;
     }
     const buf = Buffer.from(resp.content as string, 'base64');
+    // 5.3 WS5: parse the proto into a labeled tree (headings, forms, links,
+    // images, tables, geometry). NO-HARM GUARANTEE: any failure falls back to
+    // the B6-spike flat dump below.
+    const parsed = decodeAnnotatedPageContent(resp.content as string);
+    if (parsed) {
+      return ok(parsed.lines.join('\n') + `\n[APC] ${parsed.nodeCount} node(s), ${buf.length}B proto`);
+    }
     const strings = buf.toString('latin1').match(/[ -~]{8,}/g) ?? [];
     return ok({
       spike: true,
+      parseFailed: true,
       contentBytes: buf.length,
       base64Head: buf.toString('base64').slice(0, 500),
       asciiStrings: strings.slice(0, 80),
@@ -1294,7 +1303,7 @@ const PAGE_INPUT_SCHEMA = {
     format: {
       type: 'string' as const,
       enum: ['text', 'html', 'full', 'annotated'] as const,
-      description: "Content format. 'text' (default) for visible text, 'html' for innerHTML, 'full' for complete document HTML with doctype, 'annotated' for the experimental Page.getAnnotatedPageContent binary-proto dump (B6 spike).",
+      description: "Content format. 'text' (default) for visible text, 'html' for innerHTML, 'full' for complete document HTML with doctype, 'annotated' for Page.getAnnotatedPageContent parsed into a labeled tree (headings, links, forms, images, tables with viewport geometry — the AI view of the page; 5.3 WS5). Falls back to a flat binary dump if the proto can't be parsed.",
     },
     audio: { type: 'boolean' as const, description: 'record_start: capture audio (default false).' },
     clickMarkers: {

@@ -208,6 +208,19 @@ rig; outcome-(b) gate error must include the exact flag string.
 (CHIPS `partitionKey` and the network-state emulation moves — moved to
 the 5.4 carcass per maintainer priority call, 2026-10-28.)
 
+**WS5 CLOSE-OUT (2026-10-28, shipped + live-verified):**
+`utils/proto-wire.ts` (no deps): generic wire reader + advisory
+FIELD_MAP from common_quality_data.proto (read at implementation
+time, 2026-10-28). 3-layer fallback as specced: parse failure OR
+missing root_node OR zero-content sanity → the B6 flat dump (now
+tagged parseFailed). 10 unit tests build synthetic payloads with a
+test-side encoder (heading/text/link+geometry/form+controls+options/
+image/table+cell/iframe/redacted-iframe/unknown-type-by-number/
+negative-geometry/node-cap 4500). LIVE GATE PASS on Brave 153: rig
+page → `[APC] mode=actionable-elements url=… title="WS0 WebMCP
+spike rig"` + geometry-annotated tree (input[text] value=… @10,333
+212×27), 17 nodes / 2059B proto. 469 tests green.
+
 **WS4 CLOSE-OUT (2026-10-28, delivered + unit-verified 459 tests;
 live gate split-verified):**
 
