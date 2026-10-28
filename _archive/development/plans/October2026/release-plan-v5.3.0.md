@@ -7,6 +7,20 @@ anti-features are cut, 5.4 candidates named. Research base:
 `_archive/research/October2026/2026-10-28-v5.3-parity-audit.md`
 (librarian inventory + oracle grading + metis framing).
 
+Release arc (metis — say it, don't infer it): **make the real browser
+legible and operable for an agent — then harden it.** WS5 (see),
+WS2 (confirm), WS3 (talk to pages), WS6 (talk to extensions), WS1
+(safely). One arc, not a grab-bag; and the maintainer's re-shuffle
+principle is recorded to prevent the next scope argument: **5.3 favors
+what an agent can DO in the real browser over data-format fidelity**
+(CHIPS/network-state are 5.4).
+
+Shipping lanes (metis finding 4, made explicit): **opt-in utility lane**
+= shipped + config/env-gated + documented limitation — the bar for
+niche-but-present when the cost is small. Classified under it: WS4's
+`inputVisualization`, WS6's storage stretch + trigger allow-list, and
+WS0 outcome (b)'s 5.4 shape.
+
 Law (unchanged from 5.2): all work on dev; pnpm everywhere; tool contract
 additive-only; no new runtime deps; never launch/close browsers or tabs
 autonomously; every workstream live-verified on Brave 153 before the
@@ -30,11 +44,31 @@ dead. Before building the tool, verify the FULL path on Brave 153:
 3. CDP `WebMCP.enable` on the tab session → expect `toolsAdded` event /
    tool listing; `invokeTool` → expect the page handler to run.
 
-**Kill criterion:** the page-side API is absent/disabled on Brave → no
-page can ever register tools → nothing to passthrough → **no WebMCP
-workstream ships in 5.3**; moves to the 5.4 list with "requires Chrome
-or Brave enabling the API" note (same disposition as fedcm). Do NOT
-ship a half-tool that only errors.
+**Outcome taxonomy (oracle + metis, post-verification — replaces the
+binary kill criterion):**
+- **(a) Page API live without flags on Brave 153** → GO, full WS3.
+- **(b) API exists but needs `--enable-features=WebMCP` (relaunch)** →
+  the spike CANNOT proceed in-session (never-relaunch law). Disposition:
+  maintainer may enable `chrome://flags`/flag + relaunch manually (their
+  browser, their consent — same precedent as tab navigation), then a
+  10-minute re-spike; if they consent and it works, WS3 enters as a
+  **conditional late insert** (see Sequencing); if they decline or it's
+  unresolved by the WS4 gate, **WS3 drops from 5.3 and moves to 5.4**,
+  where it ships capability-gated with the gate error naming the exact
+  flag string (that shape is actionable, not a half-tool — metis).
+- **(c) API absent entirely** → KILL, fedcm disposition: nothing to
+  passthrough; moves to the 5.4 list with a "requires Chrome/flag" note.
+  Do NOT ship a tool that only errors with no path to value.
+
+Spike diagnostics (cheap, decision-grade):
+- **Canary honesty:** `WebMCP.invokeTool` answering proves the *domain*
+  exists, nothing more (FedCm lesson restated — the canary is necessary,
+  never sufficient).
+- **Utility-world cross-check** (PW-MCP's approach fact): PW-MCP collects
+  registrations via an injected utility-world script, NOT the CDP
+  domain. If `toolsAdded` never fires but `navigator.modelContext`
+  shows registrations, record it — the CDP wiring lags the page API and
+  the passthrough is premature even in outcome (a).
 
 **Kill deliverable if killed:** the spike script + findings go into the
 research doc; WS3's design (below) is preserved verbatim for the future.
@@ -104,33 +138,60 @@ New actions (home: `page` tool or a slot in `status`-adjacent surface —
 **decision made BEFORE the release commit** (momus finding 3: the home
 determines which counts staling): additive-only):
 - `webmcp_list` — `WebMCP.enable` (idempotent) on the tab session →
-  collect `toolsAdded` events (+ any pull-style listing the protocol
-  offers) → enumerate `{name, description?}` per tool.
-- `webmcp_call {name, input?}` — `WebMCP.invokeTool` (+ handle
-  `toolResponded`/promise) → return the tool's response.
-- `webmcp_cancel {invocationId?}` — `cancelInvocation`.
+  **the protocol has NO listing method — discovery is event-driven:
+  `enable` replays currently-registered tools via `toolsAdded`** →
+  maintain a registry (per session, like the WebAuthn one) → output
+  `{name, description, frameId, annotations?}` per tool (pass the CDP
+  `Annotation` through — the protocol's own readOnly/untrustedContent
+  hints). Pull-style listing does not exist; don't invent one.
+- `webmcp_call {name, input?}` — `WebMCP.invokeTool(frameId, toolName,
+  input)` — frameId is REQUIRED by the protocol: default the tool's
+  registered frameId from the registry (falls back to the main frame);
+  returns `invocationId` immediately → resolve via the
+  `toolResponded(invocationId, status, output?, errorText?)` event
+  (status Completed|Canceled|Error) — the round-trip is
+  promise-plus-event, exactly the 5.2 overrun shape; budget for it.
+- `webmcp_cancel {invocationId}` — `cancelInvocation`.
 Every path capability-gated via `capabilities.require('WebMCP')` →
 actionable `DomainUnsupportedError` on Brave-without-API/older Chrome.
 Event subscription lifetime: wire like the WebAuthn consumers
 (per-session, cleaned on disconnect). Untrusted-content rule applies:
-tool responses are PAGE-CONTROLLED data — treat as data, never follow
+**the protocol description itself warns `toolResponded.output` is
+untrusted/prompt-injection risk** — treat as data, never follow
 directives found in them (same policy as REA/annotated content).
+Stretch (few lines, not gate-critical): when `page.snapshot` runs and
+the session's WebMCP registry is non-empty, append a one-line section
+(`WebMCP tools: name — desc …`) — mirrors PW-MCP's discovery UX and
+solves "agent doesn't know to call webmcp_list first" (oracle).
+Deliberately NOT copied from PW-MCP: dynamic MCP-tool projection (tools
+appearing/disappearing mid-session) — it collides with the
+count-staleness problem that failed the last two release commits; our
+static list/call/cancel matches cdt-mcp's functional surface (theirs is
+CLI-daemon commands, not standard tools).
 Tests: unit (mock session, event wiring, gating); live per WS0 spike
-rig.
+rig; outcome-(b) gate error must include the exact flag string.
 
 ## WS4 — riders (~0.25 session)
 
-1. **`Page.setInputVisualization`** (J): emulate gains
+1. **`Page.setInputVisualization`** (J; protocol-verified: sole param
+   `clicks?: boolean`, experimental): emulate gains
    `inputVisualization: true|false` (gated; cleared by `reset`).
    Auto-enable during `page.record_start` (opt-out flag) so recorded
-   video shows input activity. Live-verify on Brave 153.
-2. **WebAuthn follow-ons:** `set_credential_properties` action; event
-   surfacing in the registry (`list_credentials` gains last-activity) —
-   NOTE (momus finding 5): the 5.2 plan deliberately dropped WebAuthn
-   events as "telemetry without a consumer"; this REVERSES that with the
-   consumer named — `list_credentials` output — which is defensible now;
-   the rig gains client-side WebCrypto signature verification →
-   sabotage E2E PASS/FAIL.
+   video shows click markers. Live-verify on Brave 153.
+2. **WebAuthn follow-ons** (protocol-verified — exact surface):
+   `set_credential_properties` action → CDP
+   `WebAuthn.setCredentialProperties(authenticatorId, credentialId,
+   backupEligibility?, backupState?, signCount?)` — note `signCount`
+   is settable (**-1 removes the counter** — great for testing
+   signCount-monotonicity handling in RPs) — expose all three;
+   event surfacing in the registry (`list_credentials` gains
+   last-activity) from `credentialAdded/Deleted/Asserted` **plus
+   `credentialUpdated`** (verified present) — NOTE (momus finding 5):
+   the 5.2 plan deliberately dropped WebAuthn events as "telemetry
+   without a consumer"; this REVERSES that with the consumer named —
+   `list_credentials` output — which is defensible now; the rig gains
+   client-side WebCrypto signature verification → sabotage E2E
+   PASS/FAIL.
 
 (CHIPS `partitionKey` and the network-state emulation moves — moved to
 the 5.4 carcass per maintainer priority call, 2026-10-28.)
@@ -154,39 +215,91 @@ gained `includeActionableInformation?` on 2026-10-26.
 
 ## WS6 — extensions subset (promoted into 5.3 per maintainer; ~0.5 session)
 
-Capability-gated (the `Extensions` canary answers on Brave 153):
+Capability-gated (the `Extensions` canary answers on Brave 153).
+**Protocol-verified precision: `getExtensions()` lists UNPACKED
+extensions ONLY** (description is explicit) — so the live test needs a
+trivial test unpacked extension (a manifest + a file — cheap to make);
+the kill criterion covers it:
 - `browser` tool gains `extensions` listing via
-  `Extensions.getExtensions` (enumerate running/unpacked extensions)
-- extension toolbar-button trigger via `Extensions.triggerAction`
-  (the "click the extension icon" programmatic equivalent — safe,
-  attach-only)
-- **NOT** `loadUnpacked` (needs launch flags, mutates the user's
-  profile — anti-feature, oracle-graded; remains usable only as a
+  `Extensions.getExtensions` → `{id, name, version, path, enabled}`
+  per unpacked extension (an empty list on a stock profile is EXPECTED,
+  not an error)
+- extension toolbar-button trigger via `Extensions.triggerAction(id,
+  targetId)` — both params required by the protocol; `targetId`
+  resolves from the designated tab (the "click the extension icon"
+  programmatic equivalent — safe, attach-only).
+  **Guardrails (metis, mandatory):**
+  (1) trigger is OPT-IN via `CDP_EXTENSION_TRIGGER_ALLOWLIST` env
+  (comma list of extension ids; mirror the O3 `CDP_ALLOWED_ORIGINS`
+  pattern) — default: trigger fails with a "not allow-listed" error,
+  listing always works; the allow-list answers the password-manager
+  case (autofill popups, vault unlocks, extension-side network calls —
+  the attach-only law governs tabs/browser but says nothing about
+  extension actions);
+  (2) the id is EXACT and explicit — never inferred: no wildcard, no
+  "first listed," no iterate-and-trigger, never a side effect of
+  another action or a verify/poll loop;
+  (3) untrusted-content rule applies to trigger results (extension
+  popups/responses are page-adjacent untrusted content), and the tool
+  description states firing the trigger = "equivalent to a user
+  clicking the toolbar icon; effects belong to the extension."
+- stretch (protocol offers it, gate by time): unpacked-extension
+  storage read/clear (`getStorageItems` etc.)
+- **NOT** `loadUnpacked`/`uninstall` (mutates the user's profile —
+  anti-feature, oracle-graded; loadUnpacked remains usable only as a
   canary probe)
-Live-verify on Brave 153 (find/make an unpacked extension or verify
-the listing path; kill-criterion: if the domain answers but listing is
-empty/broken on Brave → ship listing-only or defer, no half-surface).
+Live-verify on Brave 153 with a test unpacked extension; kill-criterion:
+if the domain answers but listing is empty/broken on Brave → ship
+listing-only or defer, no half-surface.
 
 ## 5.4 carcass (named now, built next cycle)
 
 - **Performance trace → insights** (flagship candidate): record
   trace → parse into structured insights (LCP/CLS/slow blocks) — own
   parser project; `Tracing`/`Performance` canaries ready.
-- **Heap-snapshot tooling:** dump a `.heapsnapshot` to a temp file for
-  manual DevTools loading first; later maybe diffing — heavy on a live
-  browser, so opt-in only.
-- **CHIPS `partitionKey`:** storage export/import passthrough —
-  cookies and storage-state payloads carry `partitionKey` in the dump
-  AND accept it on import (Playwright-compatible schema); the 5.3
+- **Heap-snapshot tooling (reframed per verified fact — cdt-mcp: 13 of
+  14 tools are BROWSERLESS):** (a) live `heapsnapshot_dump` to a temp
+  file — the ONLY browser-touching part, opt-in; (b) offline analysis
+  actions on the dump file — retainers/dominators/diff of two dumps —
+  pure-node parsing of the structured `.heapsnapshot` tables format,
+  no browser attached, no new deps. "Heavy on a live browser" applies
+  only to the dump; the analysis is offline.
+- **Network-state emulation (protocol-verified, expanded task):**
+  `Network.emulateNetworkConditions` — which our current
+  `networkCondition` presets use — is now **DEPRECATED** ("in favor of
+  emulateNetworkConditionsByRule and overrideNetworkState"). So 5.4's
+  job is a MIGRATION + upgrade: (a) `overrideNetworkState(offline,
+  latency, downloadThroughput, uploadThroughput, connectionType?)` —
+  the `navigator.onLine`/`navigator.connection` spoof (NOT a bare
+  boolean — throughput params required; wrap with sensible defaults:
+  offline → throughputs -1); (b)
+  `emulateNetworkConditionsByRule(matchedNetworkConditions[])` —
+  per-rule shape `NetworkConditions {urlPattern (URLPattern syntax,
+  absolute; empty = match-all), latency, downloadThroughput,
+  uploadThroughput, packetLoss?, packetQueueLength?, packetReordering?,
+  offline?, connectionType?}` — first match wins, ruleIds echo into
+  requestWillBeSentExtraInfo. Verify the ByRule API works on Brave 153
+  before migrating.
+- **CHIPS `partitionKey` (protocol-verified):** cookies carry
+  `partitionKey?: {topLevelSite, hasCrossSiteAncestor}` (+`partitionKeyOpaque`)
+  in both `Network.getCookies` and `Storage.getCookies`; `CookieParam`
+  accepts it on set; `deleteCookies` filters by it — passthrough in
+  export AND import; **import accepts BOTH forms**: `partitionKey?: string`
+  (Playwright sourceOrigin shorthand → normalize to
+  `{topLevelSite: value, hasCrossSiteAncestor: false}`) and the CDP
+  object form. The 5.3
   release-commit row must name this as a visible deferral. Live gate
   for when it lands: a partitioned cookie survives export→import.
-- **Network-state emulation:** `Network.overrideNetworkState`
-  (`navigator.onLine` spoof) + `emulateNetworkConditionsByRule`
-  (per-URL-pattern throttling).
-- **HAR record/replay:** compare our `interact` (per-request mock — the
-  safe shape) with Playwright's routeFromHAR; adopt ONLY what's missing
-  without the side-effect-heavy replay-routing model; record/export
-  (replay-off) may land as a Nice.
+- **`Browser.addMockCamera`** (verified, session-scoped — dies with the
+  CDP session): mock-webcam rider idea for emulate, pairs with
+  media-testing asks; niche, opt-in.
+- **HAR replay — shrunk (verified: PW-MCP ships ZERO HAR tools; replay
+  exists only in the library API; we already ship `observe.har`
+  export):** no competitor pressure; export covers record; revisit
+  replay only on a specific user ask. Route-parity note for the
+  record: PW-MCP's `browser_route` (mocked responses, glob patterns,
+  route.fulfill) is functionally equivalent to our Fetch-domain
+  intercept — verified, no gap.
 - **Source-mapped console stacks** (small; needs Debugger-domain
   symbolication — low decision value, cheap to ride along).
 - fedcm + PWA remain **parked** (both require stock Chrome — Brave
@@ -199,10 +312,17 @@ empty/broken on Brave → ship listing-only or defer, no half-surface).
   lands only if a target browser ships them; security-sensitive →
   design review first).
 
-## Cut (final — do not revisit)
+## Deferred (long-dated — re-evaluate with new evidence, not cut forever)
 
-- Lighthouse audits (engine dep; hijacks the live browser)
+- Lighthouse audits (verified correction: cdt-mcp runs it IN-PROCESS on
+  the same page — NOT a separate-browser hijack; the real disqualifier
+  is the heavy bundled Lighthouse dependency, which breaks the zero-dep
+  law)
 - Multi-screen emulation (DevTools-UI parity, no agent ask)
+
+Both stay on the books per maintainer: **deferred, not dead** — revisit
+if the positioning changes (e.g., a test-runner product tier) or a
+specific user need shows up.
 
 ## Sequencing
 
@@ -217,20 +337,31 @@ empty/broken on Brave → ship listing-only or defer, no half-surface).
 | 7 | WS6 extensions subset | 0.5 | live listing + trigger |
 | 8 | Release commit: **count reconciliation sweep** (momus finding 3 — failed in BOTH 5.1.0 and 5.2.0): README badges + tools table + per-tool rows, `index.ts:645` "15 tools" instruction string, `types.ts:69`, `AGENTS.md:25`; WS3 home decision finalized first; new tool → README rows per AGENTS.md rule 4 → bump → `scripts/promote.mjs` → tag | 0.5 | pipeline |
 
-Totals: **≈4.25-5.5 sessions incl. buffer** (table sums 4.0-5.0; WS2 and
-WS5 at 0.5 each → 4.25-4.75). Includes the **0.25-0.5 live-fix buffer**
+**Trim order (pre-declared — metis finding 1):** if the buffer
+exhausts, drop in this order and hold: WS4 stretch → WS6 trigger
+stretch → WS6 storage stretch → hold.
+
+**Outcome-(ii) insert rule (oracle finding 4):** if WS0 lands on
+outcome (b) and the maintainer consents to flag + relaunch + re-spike,
+WS3 becomes a conditional late insert after the re-spike; if
+unresolved by the WS4 gate, drop WS3 and proceed — additive-only makes
+the drop free (nothing to reconcile in the count sweep).
+
+Totals: **≈4.25-5.5 sessions incl. buffer** (table sums 4.25-4.75 with
+WS2 at 0.5-1 and WS5 at 0.5-1; WS3 conditional insert adds up to 1 on
+outcome (b)+consent). Includes the **0.25-0.5 live-fix buffer**
 (momus finding 4: 5.2's WS1 live gate alone produced 4 in-cycle tool
 fixes; the webmcp_call ↔ toolResponded round-trip is the same overrun
 shape). Test baseline entering the cycle: **394 green**; each
 workstream's gate adds its expected count (rough: WS1 → ~+8, WS2 →
 ~+10, WS3 → ~+8; exact at implementation — creep shows numerically).
 
-Competitor checkouts for capability verification during the cycle
-(cover local grep when a protocol/method detail is disputed):
-**`D:\.development\Clones\competitors`** (playwright, playwright-mcp, chrome-devtools-mcp, puppeteer,
-devtools-protocol — shallow clones, refresh with `git pull` before
-relying on them; if a pull fails on ownership, delete the folder and
-re-clone — do NOT add safe.directory overrides).
+Competitor checkouts for capability verification during the cycle:
+see `_archive/development/competitors.md` for the brief + procedure —
+**ask the maintainer where the clones live before relying on a path**
+(no hardcoded location here); refresh with `git pull` before relying
+on them; if a pull fails on ownership, delete the folder and re-clone
+— do NOT add safe.directory overrides (AGENTS.md rule).
 
 ## Verification matrix (live, per item)
 
@@ -244,8 +375,9 @@ re-clone — do NOT add safe.directory overrides).
 
 ## Risks
 
-- **WebMCP page API dead on Brave** → WS0 kill (fedcm precedent; no
-  substitute feature).
+- **WebMCP page API dead on Brave** → WS0 outcome (c) kill (fedcm
+  precedent); **flag-gated** → outcome (b): maintainer-consent re-spike
+  or WS3 drops to 5.4 (no substitute feature either way).
 - **Scrubber over-reach** → export_state exemption + unit matrix; false
   positives documented.
 - **Verify polling vs auto-wait interference** → verify uses the same

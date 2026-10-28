@@ -83,6 +83,11 @@ code:
 Machine-specific absolute paths live only in local tool config, never in
 repo files. Package-manager preference: pnpm / `pnpm dlx` first; npx/npm
 only when pnpm is unavailable.
+Competitor/reference checkouts (see `_archive/development/competitors.md`
+for the brief): refreshing them with plain `git pull` is fine; if a
+clone/pull fails on repository ownership, delete the folder and
+re-clone. **Never modify global git config (safe.directory etc.)
+without the maintainer's explicit approval.**
 
 ## Development rules
 
