@@ -452,9 +452,19 @@ Set any combination of properties in a single call:
 Test passkey flows without a real security key. Create a virtual authenticator
 on a tab, then drive the page normally — the browser intercepts
 `navigator.credentials.create/get` and the authenticator auto-responds.
-Authenticators live in CDP memory only: nothing touches the user's real
-keyring, and they die with the connection or tab. Create the authenticator
-BEFORE the page runs its WebAuthn calls.
+Authenticators live in browser memory only: nothing touches the user's real
+keyring; they die when the tab closes, the browser exits, or the MCP server
+disconnects, and they survive in-tab session re-attaches (process swaps)
+orphaned from the registry — recreate to re-address them. Create the
+authenticator BEFORE the page runs its WebAuthn calls.
+
+Binary parameters take base64 (standard or URL-safe, padding optional —
+normalized automatically). Resident credentials need a `userHandle` (one is
+auto-generated when omitted). Caveat: pages using WebAuthn conditional
+mediation (e.g. webauthn.io's page-load autofill setup) keep a pending
+ceremony that can starve the site's own `credentials.create` with
+NotAllowedError — reload and retry, or pre-provision credentials with
+`add_credential` and drive the login path.
 
 | Action | Description | Required | Optional |
 |--------|-------------|----------|----------|

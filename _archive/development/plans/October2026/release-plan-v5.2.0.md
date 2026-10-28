@@ -198,6 +198,38 @@ the Chromium scope answer); `set_override_bits isBogusSignature:true` →
 site's flow visibly fails; detach-owner-tab lifecycle case.
 **Effort:** ~2 sessions code+unit, +0.5 live.
 
+### WS1 live verification — RUN 2026-10-28 (verdicts locked)
+
+Driven through the real tool against Brave 153 (webauthn.io + a local
+rig page). Results fed BACK into the tool in the same cycle:
+
+| Live check | Verdict |
+|---|---|
+| `add_authenticator` zero-config, live | ✅ defaults correct |
+| Page `credentials.create` → interception → stored | ✅ local rig `CREATED`; webauthn.io probe `RESOLVED` |
+| Page `credentials.get` (conditional UI) → assertion consumed | ✅ signCount 0→1→3 across loads |
+| `list_credentials` live inspection | ✅ rpId/resident/signCount/user data all correct |
+| `add_credential` (provision-then-login) | ✅ after fixes — see below |
+| one-internal limit → actionable error | ✅ live |
+| `set_override_bits` set/clear | ✅ tool-level; full E2E sabotage needs an RP that accepts our registration (webauthn.io's server-side username gate rejects invented credentials first) — follow-up |
+| Cross-session visibility | ✅ `getCredentials` browser-wide (raw session saw MCP's credential); `addCredential` SESSION-BOUND (raw session: "Could not find a Virtual Authenticator") — owner-routing design vindicated |
+| Lifecycle | refined: authenticators survive in-tab session re-attach (one-internal limit fired across a process swap) but die on full WS disconnect (fresh internal add succeeded after server restart) — README/CHANGELOG corrected |
+
+Live failures → tool fixes (same cycle): (1) per-session virtual
+environment dies on re-attach → every authenticator action best-effort
+re-enables; (2) Chromium rejects unpadded/URL-safe base64 in binary
+fields → normalize automatically; (3) resident credentials REQUIRE
+`userHandle` ("The User Handle is required for Resident Credentials") →
+auto-generate; (4) error regex widened to match "Virtual Authenticator
+Environment has not been enabled".
+
+Documented caveat (honest limitation): webauthn.io's page-load
+conditional-mediation get() keeps a pending ceremony that can starve the
+site's own registration create() with NotAllowedError once a matching
+resident credential exists. Reload-first, or pre-provision with
+`add_credential` and drive the login path. Not a tool bug — protocol-
+level interplay; noted in README + tool description.
+
 ## WS2 — `fedcm` tool (conditional on the demo-RP dialog test)
 
 **First item of this workstream — the dialog-flow spike** (needs navigating
@@ -322,8 +354,8 @@ on the demo RP, `dismiss` + `reset_cooldown`, pre-attach-dialog recovery.
 |---|---|---|---|
 | 1 | WS0 spike | done | — |
 | 2 | WS3-E4 wrapError + gating fix (small, WS1 depends on it) | **done 2026-10-27** | 359 tests green |
-| 3 | WS1 `webauthn` state + tool + cleanup + tests | 2 | unit green |
-| 4 | WS1 live verification (webauthn.io + scope + override bits) | 0.5 | live |
+| 3 | WS1 `webauthn` state + tool + cleanup + tests | **done 2026-10-27** | 393 tests green |
+| 4 | WS1 live verification (webauthn.io + scope + override bits) | **done 2026-10-28** | interception round-trip proven; findings fed back into the tool |
 | 5 | WS2 FedCm dialog spike (demo RP; user consent to navigate) | 0.25 | GO/KILL |
 | 6 | WS2 `fedcm` state + tool + tests + live | 1.5 | live (if GO) |
 | 7 | WS3 hygiene commits | 0.5 | live spot-checks |
