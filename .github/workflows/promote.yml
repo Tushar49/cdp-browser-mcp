@@ -1,0 +1,174 @@
+name: Promote dev to main
+
+# Token-optional promote. main's ruleset (no merge commits + verified
+# signatures) blocks github-actions[bot] pushes, and the Actions app
+# cannot be added to a ruleset bypass list — so this workflow can ONLY
+# push when a PROMOTE_TOKEN secret holds the owner's fine-grained PAT
+# (Contents: Read and write, this repo only). Pushes then count as the
+# owner, who is on the ruleset bypass list.
+#
+# WITHOUT PROMOTE_TOKEN this workflow does NOT push — it prints full
+# setup instructions and stops. The default path is the local script:
+#   node scripts/promote.mjs <version>
+# (runs on the maintainer's machine; credential manager = bypassed actor;
+# no tokens stored anywhere. See AGENTS.md "Promote flow".)
+#
+# Why a PAT makes the workflow work: rulesets evaluate the PUSH ACTOR.
+# github-actions[bot] is not bypass-listed (and cannot be added); the
+# owner is. A PAT-attributed push behaves exactly like an owner push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for the merge commit (e.g. v5.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PROMOTE_TOKEN availability
+        id: token
+        env:
+          HAS_TOKEN: ${{ secrets.PROMOTE_TOKEN != '' }}
+        run: echo "available=$HAS_TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: No PROMOTE_TOKEN — print setup instructions and stop
+        if: steps.token.outputs.available == 'false'
+        run: |
+          cat <<'EOF'
+          ─────────────────────────────────────────────────────────────
+          ❌ PROMOTE_TOKEN is not set — this workflow cannot push to main.
+
+          WHY: main's ruleset blocks github-actions[bot] pushes (no merge
+          commits + verified signatures), and the GitHub Actions app cannot
+          be added to a ruleset bypass list. Rulesets evaluate the PUSH
+          ACTOR — with your PAT the actor is YOU (bypass-listed) and the
+          promote lands.
+
+          OPTION 1 — set up PROMOTE_TOKEN (one-time, ~2 minutes):
+            1. GitHub → (your avatar) → Settings → Developer settings →
+               Personal access tokens → Fine-grained tokens →
+               "Generate new token":
+                 • Name:              cdp-browser-promote
+                 • Expiration:        90 days (rotate it — calendar a reminder)
+                 • Repository access: Only select repositories →
+                                      cdp-browser-mcp
+                 • Permissions:       Contents → Read and write
+                                      (nothing else is granted)
+            2. Copy the token, then in THIS repository:
+               Settings → Secrets and variables → Actions →
+               "New repository secret":
+                 • Name:   PROMOTE_TOKEN
+                 • Secret: paste the token
+            3. Re-run this workflow (Actions → Promote dev to main → Run).
+
+            Safety profile: one repo, one permission, 90-day expiry,
+            revocable in one click. Strictly narrower than the owner's
+            normal push rights.
+
+          OPTION 2 (default, no token) — promote locally from the repo root:
+            node scripts/promote.mjs <version>
+            (clean tree required; runs the merge/strip/verify/push flow
+            through your credential manager — see AGENTS.md "Promote flow")
+
+          EITHER PATH: wait for Guard main + CI to go green before tagging.
+          Never tag past a red Guard main (v5.1.0 precedent).
+          ─────────────────────────────────────────────────────────────
+          EOF
+          exit 1
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.available == 'true'
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.PROMOTE_TOKEN }}
+
+      - name: Merge dev (no commit yet)
+        if: steps.token.outputs.available == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin dev
+          git merge --no-ff --no-commit origin/dev || true
+
+      - name: Sync .gitignore from dev shadow copy (when dev changed it)
+        if: steps.token.outputs.available == 'true'
+        run: |
+          if git diff --cached --quiet -- .main.gitignore; then
+            echo "No .main.gitignore change on dev — keeping main's .gitignore."
+          else
+            echo "Dev changed .main.gitignore — syncing to main's .gitignore."
+            git show :.main.gitignore > .gitignore
+            git add .gitignore
+          fi
+
+      - name: Strip dev-only material (explicit — .gitignore cannot do this)
+        if: steps.token.outputs.available == 'true'
+        run: |
+          # -f: force-remove modify/delete-conflicted entries (dev changed a
+          # stray that main deleted). --ignore-unmatch: don't abort the whole
+          # command when a pathspec matches nothing (dev doesn't always track
+          # .research/.github/AGENTS.md — a bare git rm aborts as a unit and
+          # the 2>/dev/null || true wrapper used to hide the fatal, which
+          # stranded every match in the index; caught live on the v5.2.0
+          # promote).
+          git rm -rf -q --ignore-unmatch _archive .research .githooks .main.gitignore \
+            .github/AGENTS.md .github/copilot-instructions.md
+          # git rm must not fail silently (e.g. it aborts as a unit when it
+          # hits an oddity) — verify the strip actually emptied the index.
+          leaks=$(git ls-files "_archive" ".research" ".githooks" ".main.gitignore" \
+            ".github/AGENTS.md" ".github/copilot-instructions.md")
+          if [ -n "$leaks" ]; then
+            echo "❌ dev-only paths survived the strip (git rm failed partway):"
+            echo "$leaks"
+            echo "Fix: resolve leftovers by hand, then re-run the workflow."
+            exit 1
+          fi
+          echo "✅ no dev-only paths tracked in the merge index."
+          echo "── working-tree check ──"
+          git status --short
+          test ! -e _archive
+          test ! -e .research
+          test ! -e .githooks
+          test ! -e .main.gitignore
+
+      - name: Abort on any other conflict (resolve by hand, then re-run)
+        if: steps.token.outputs.available == 'true'
+        run: |
+          conflicts=$(git diff --name-only --diff-filter=U || true)
+          if [ -n "$conflicts" ]; then
+            echo "❌ Merge conflicts outside dev-only paths — aborting, resolve manually:"
+            echo "$conflicts"
+            git merge --abort
+            exit 1
+          fi
+          echo "✅ No residual conflicts."
+
+      - name: Commit merge
+        if: steps.token.outputs.available == 'true'
+        run: git commit -m "Merge dev → main: ${{ inputs.version }}"
+
+      - name: Pre-push stray check (same as guard-main.yml, so a stray never pushes)
+        if: steps.token.outputs.available == 'true'
+        shell: bash
+        run: |
+          for p in "_archive" ".research" ".githooks" ".main.gitignore" ".github/AGENTS.md" ".github/copilot-instructions.md"; do
+            n=$(git ls-files "$p" | wc -l)
+            if [ "$n" -gt 0 ]; then
+              echo "❌ promote commit would carry dev-only path '$p' ($n files):"
+              git ls-files "$p"
+              exit 1
+            fi
+          done
+          echo "✅ promote commit carries no dev-only paths."
+
+      - name: Push main
+        if: steps.token.outputs.available == 'true'
+        run: git push origin HEAD:main

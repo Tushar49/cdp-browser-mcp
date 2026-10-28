@@ -121,13 +121,15 @@ Never:
   so it never lands on main. If dev adds a *shared* rule, it belongs in
   `.main.gitignore`. `guard-main.yml` fails if `.main.gitignore` reappears
   on main.
-- **Promote flow (dev → main): run the local script —
+- **Promote flow (dev → main): default is the local script —
   `node scripts/promote.mjs <version>` from the repo root on a clean
   tree.** It runs the merge on the laptop (your credential manager = the
-  bypass-listed actor; a GitHub Actions runner can never push here —
-  main's ruleset blocks `github-actions[bot]` and the Actions app cannot
-  be added to a ruleset bypass list, so `.github/workflows/promote.yml`
-  was retired after the v5.2.0 promote saga). The script does: fetch →
+  bypass-listed actor; no tokens stored anywhere). The retired-then-
+  restored `.github/workflows/promote.yml` stays available for future
+  use: with a `PROMOTE_TOKEN` secret (owner's fine-grained PAT,
+  Contents-only for this repo) the workflow pushes as the bypass-listed
+  owner; without it the workflow prints full setup instructions and
+  stops instead of failing mysteriously. The script does: fetch →
   `git merge --no-ff --no-commit origin/dev` → sync `.gitignore` from
   dev's `.main.gitignore` shadow when it changed →
   `git rm -rf --ignore-unmatch _archive .research .githooks .main.gitignore .github/AGENTS.md .github/copilot-instructions.md`

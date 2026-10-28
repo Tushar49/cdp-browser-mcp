@@ -5,7 +5,7 @@ All notable changes to CDP Browser MCP Server will be documented in this file.
 ## [Unreleased]
 
 ### Changed
-- repo-infra: the Actions-based "Promote dev to main" workflow is RETIRED, replaced by the local `scripts/promote.mjs` (same merge → .gitignore sync → strip → hard-verify → push flow, same hard-fail leak checks). Reason, caught across the v5.2.0 promote: main's ruleset (no merge commits + verified signatures) blocks `github-actions[bot]` pushes and the GitHub Actions app cannot be added to a ruleset bypass list, so a workflow could never push; the local script pushes as the repo owner (bypass-listed) with no tokens involved. Also fixed the strip command's unit-abort trap (`git rm -rf --ignore-unmatch`; bare `git rm -r` died on a pathspec matching nothing and `2>/dev/null || true` hid the fatal).
+- repo-infra: the Actions-based "Promote dev to main" workflow is now token-optional: with a `PROMOTE_TOKEN` secret (the owner's fine-grained PAT — Contents read/write, this repo only) the workflow promotes and pushes as the bypass-listed owner; without the secret it prints complete setup instructions (why, and both paths) and stops instead of dying on the protected-ref rejection. Default remains the local `scripts/promote.mjs` (same merge → .gitignore sync → strip → hard-verify → push flow, same hard-fail leak checks, no tokens). Reason, caught across the v5.2.0 promote: main's ruleset (no merge commits + verified signatures) blocks `github-actions[bot]` pushes and the GitHub Actions app cannot be added to a ruleset bypass list. Also fixed the strip command's unit-abort trap (`git rm -rf --ignore-unmatch`; bare `git rm -r` died on a pathspec matching nothing and `2>/dev/null || true` hid the fatal).
 
 ## [5.2.0] - 2026-10-28
 
