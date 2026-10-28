@@ -208,6 +208,34 @@ rig; outcome-(b) gate error must include the exact flag string.
 (CHIPS `partitionKey` and the network-state emulation moves — moved to
 the 5.4 carcass per maintainer priority call, 2026-10-28.)
 
+**WS4 CLOSE-OUT (2026-10-28, delivered + unit-verified 459 tests;
+live gate split-verified):**
+
+1. `emulate inputVisualization` — SHIPPED. Live-caught: the method
+   exists in the ebca906 protocol JSON but is **NOT implemented by
+   the Brave 153 build** (the Page-method analog of the per-target
+   `protocol_config` exclusions). Shipped anyway with correct
+   behavior: emulate fails actionably (names the build requirement),
+   `record_start` degrades silently. Matrix row "visible in recorded
+   video" — **cannot be satisfied on this browser**; verification is
+   the command-level gate path (both proven live).
+2. `set_credential_properties` + `fullIds` + `signCount -1` display
+   — SHIPPED, **CDP-level live gate PASS on Brave 153** (current
+   profile; credentials injected via CDP, no ceremony). Live-caught
+   bug: credentialId not base64-normalized → Chromium "Invalid
+   parameters"; fixed + unit-locked.
+3. Page-level sabotage E2E (rig: genuine→VALID, isBogusSignature→
+   INVALID, restore→VALID): **PASSED on Brave 153 profile
+   17CFBEA2** (pre-switch). On the current profile the assertion path
+   is blocked by Bitwarden's `webAuthenticationProxy` (routes ALL
+   page WebAuthn away from CDP virtual authenticators; user keeps
+   Bitwarden — documented as a tool-description CAVEAT). Rig is now
+   assert-only by design: it NEVER calls `credentials.create`, so an
+   intercepted/absent environment fails loud instead of creating real
+   passkeys. Battery expectation bugs found during the gate (byte
+   alphabet, signCount -1 semantics) fixed + unit-locked.
+   Rerun of the full battery on a Bitwarden-free profile — open item.
+
 ## WS5 — annotated-content parser (PROMOTED to full workstream per
 ## maintainer, 2026-10-28; ~0.5-1 session)
 

@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>WS4 webauthn rig</title></head>
+<body>
+<pre id="ws4status">starting…</pre>
+<script>
+// WS4 rig — ASSERT-ONLY by design: credentials.create is NEVER called.
+// The battery injects a credential via CDP add_credential and passes its id
+// + public key (SPKI DER, standard base64) as URL params. If something else
+// (Bitwarden's webAuthenticationProxy) intercepts WebAuthn, the assertion on
+// this unknown-to-it credential FAILS LOUD and nothing is ever created.
+const statusEl = document.getElementById('ws4status');
+const log = (s) => { statusEl.textContent = s; window.__WS4_STATUS = s; };
+
+const q = new URLSearchParams(location.search);
+const b64uToBytes = (s) => {
+  let std = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (std.length % 4) std += '=';
+  return new Uint8Array([...atob(std)].map((c) => c.charCodeAt(0)));
+};
+const credIdBytes = q.get('credId') ? b64uToBytes(q.get('credId')) : null;
+const spkiBytes = q.get('spki') ? b64uToBytes(q.get('spki')) : null;
+
+function derToRawSignature(der) {
+  // WebAuthn ECDSA signatures are ASN.1 DER; WebCrypto verify wants raw r||s.
+  // An all-zero (sabotaged) signature doesn't parse — that IS the sabotage signal.
+  try {
+    let p = 2;
+    if (der[1] & 0x80) p = 2 + (der[1] & 0x7f);
+    if (der[p] !== 0x02) throw new Error('no INTEGER r');
+    const rlen = der[p + 1];
+    let r = der.slice(p + 2, p + 2 + rlen);
+    p += 2 + rlen;
+    if (der[p] !== 0x02) throw new Error('no INTEGER s');
+    const slen = der[p + 1];
+    let s = der.slice(p + 2, p + 2 + slen);
+    if (r.length > 32) r = r.slice(r.length - 32); // strip DER leading-zero pad
+    if (s.length > 32) s = s.slice(s.length - 32);
+    const raw = new Uint8Array(64);
+    raw.set(r, 32 - r.length);
+    raw.set(s, 64 - s.length);
+    return raw;
+  } catch (e) {
+    return null; // unparseable = invalid by definition
+  }
+}
+
+async function verifyAssertion(pubKey) {
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rpId: location.hostname,
+      allowCredentials: [{ type: 'public-key', id: credIdBytes }],
+      userVerification: 'required',
+    },
+  });
+  const r = assertion.response;
+  const clientHash = await crypto.subtle.digest('SHA-256', r.clientDataJSON);
+  const signed = new Uint8Array(r.authenticatorData.byteLength + clientHash.byteLength);
+  signed.set(new Uint8Array(r.authenticatorData), 0);
+  signed.set(new Uint8Array(clientHash), r.authenticatorData.byteLength);
+  const rawSig = derToRawSignature(new Uint8Array(r.signature));
+  if (!rawSig) return { valid: false, signCount: null, reason: 'unparseable signature (sabotage?)' };
+  const valid = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pubKey, rawSig, signed);
+  const authData = new Uint8Array(r.authenticatorData);
+  // authData layout: rpIdHash(32) | flags(1) | signCount(4 BE)
+  const signCount = ((authData[33] << 24) | (authData[34] << 16) | (authData[35] << 8) | authData[36]) >>> 0;
+  return { valid, signCount };
+}
+
+async function run() {
+  log('boot href=' + location.href + ' | credId=' + (credIdBytes ? credIdBytes.length + 'B' : 'null') + ' | spki=' + (spkiBytes ? spkiBytes.length + 'B' : 'null'));
+  if (!credIdBytes || !spkiBytes) { log('SETUP-ERROR: missing params — href=' + location.href); return; }
+  let pubKey;
+  try {
+    pubKey = await crypto.subtle.importKey('spki', spkiBytes, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+  } catch (e) {
+    log('SETUP-ERROR spki import: ' + e.message);
+    return;
+  }
+  try {
+    const sig = await verifyAssertion(pubKey);
+    log(sig.valid ? `SIGNATURE-VALID count=${sig.signCount}` : `SIGNATURE-INVALID count=${sig.signCount} ${sig.reason || ''}`);
+  } catch (e) {
+    log('ASSERT-ERROR ' + (e.name || '') + ': ' + e.message);
+  }
+  // Re-assert (never re-create) every 2s so MCP-driven sabotage / restore shows up
+  setInterval(async () => {
+    try {
+      const s = await verifyAssertion(pubKey);
+      log(s.valid ? `SIGNATURE-VALID count=${s.signCount}` : `SIGNATURE-INVALID count=${s.signCount} ${s.reason || ''}`);
+    } catch (e) {
+      log('ASSERT-ERROR ' + (e.name || '') + ': ' + e.message);
+    }
+  }, 2000);
+}
+setTimeout(run, 300);
+</script>
+</body>
+</html>

@@ -30,11 +30,22 @@ export interface AuthenticatorRecord {
   createdAt: number;
 }
 
+/** Last observed credential lifecycle event (5.3 WS4 event surfacing). */
+export type CredentialEventKind = 'added' | 'updated' | 'asserted' | 'deleted';
+
+export interface CredentialActivity {
+  lastEvent: CredentialEventKind;
+  lastTs: number;
+  signCount?: number;
+}
+
 // ─── WebAuthnStateManager ───────────────────────────────────────────
 
 export class WebAuthnStateManager {
   /** authenticatorId → record. */
   private auths = new Map<string, AuthenticatorRecord>();
+  /** authenticatorId → (credentialId → last activity) — populated by CDP WebAuthn credential events (5.3 WS4). */
+  private credActivity = new Map<string, Map<string, CredentialActivity>>();
 
   register(authenticatorId: string, record: AuthenticatorRecord): void {
     this.auths.set(authenticatorId, record);
@@ -64,6 +75,21 @@ export class WebAuthnStateManager {
       .map(([id]) => id);
   }
 
+  /** Record one credential lifecycle event (event pipeline, 5.3 WS4). */
+  noteCredentialEvent(authenticatorId: string, kind: CredentialEventKind, credentialId: string, signCount?: number): void {
+    let m = this.credActivity.get(authenticatorId);
+    if (!m) {
+      m = new Map();
+      this.credActivity.set(authenticatorId, m);
+    }
+    m.set(credentialId, { lastEvent: kind, lastTs: Date.now(), ...(signCount !== undefined ? { signCount } : {}) });
+  }
+
+  /** Activity map for an authenticator (for list_credentials annotation). */
+  credentialActivity(authenticatorId: string): Map<string, CredentialActivity> | undefined {
+    return this.credActivity.get(authenticatorId);
+  }
+
   /** Authenticator IDs created with the `internal` transport (platform-key semantics). */
   listInternal(): string[] {
     return [...this.auths.entries()]
@@ -74,12 +100,16 @@ export class WebAuthnStateManager {
   /** Drop every entry owned by a tab (Target.targetDestroyed / tabs.close). */
   clearForTab(tabId: string): void {
     for (const [id, r] of this.auths.entries()) {
-      if (r.ownerTabId === tabId) this.auths.delete(id);
+      if (r.ownerTabId === tabId) {
+        this.auths.delete(id);
+        this.credActivity.delete(id);
+      }
     }
   }
 
   /** Drop everything (CDP disconnect — browser-side state is gone too). */
   clearAll(): void {
     this.auths.clear();
+    this.credActivity.clear();
   }
 }

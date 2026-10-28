@@ -108,6 +108,7 @@ interface PageArgs {
   frameId?: string;
   // screen recording (B6 S2)
   audio?: boolean;
+  clickMarkers?: boolean;
   // bypass_csp
   enabled?: boolean;
   // Snapshot diff
@@ -1122,6 +1123,13 @@ export async function handleFindStop(ctx: ServerContext, args: PageArgs): Promis
 export async function handleRecordStart(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
   await ensureDomain(ctx, sess, 'Page');
+  // 5.3 WS4: auto-enable click visualization so the recording shows input
+  // markers (opt-out via clickMarkers: false); disabled again on record_stop.
+  if (args.clickMarkers !== false) {
+    try {
+      await ctx.sendCommand('Page.setInputVisualization', { clicks: true }, sess);
+    } catch { /* visualization unsupported — recording continues without it */ }
+  }
   try {
     await ctx.sendCommand('Page.startScreenRecording', {
       audio: args.audio ?? false,
@@ -1135,11 +1143,17 @@ export async function handleRecordStart(ctx: ServerContext, args: PageArgs): Pro
     }
     throw err;
   }
-  return ok(`Screen recording started (audio: ${args.audio ?? false ? 'on' : 'off'}, 25fps, 1920x1080 cap). Run record_stop to save the file.`);
+  return ok(`Screen recording started (audio: ${args.audio ?? false ? 'on' : 'off'}, 25fps, 1920x1080 cap, click markers: ${args.clickMarkers !== false ? 'on' : 'off'}). Run record_stop to save the file.`);
 }
 
 export async function handleRecordStop(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
+  // 5.3 WS4: record_start turned the click markers on — turn them back off.
+  if (args.clickMarkers !== false) {
+    try {
+      await ctx.sendCommand('Page.setInputVisualization', { clicks: false }, sess);
+    } catch { /* ok */ }
+  }
   let handle: string;
   try {
     const res = (await ctx.sendCommand('Page.stopScreenRecording', {}, sess)) as { stream?: string };
@@ -1283,6 +1297,10 @@ const PAGE_INPUT_SCHEMA = {
       description: "Content format. 'text' (default) for visible text, 'html' for innerHTML, 'full' for complete document HTML with doctype, 'annotated' for the experimental Page.getAnnotatedPageContent binary-proto dump (B6 spike).",
     },
     audio: { type: 'boolean' as const, description: 'record_start: capture audio (default false).' },
+    clickMarkers: {
+      type: 'boolean' as const,
+      description: 'record_start: show click markers in the recording (default true, Page.setInputVisualization); record_stop turns them off. Set false to opt out entirely.',
+    },
     text: { type: 'string' as const, description: "Text to wait for / dialog prompt text / find: text to search for." },
     textGone: { type: 'string' as const, description: 'Text to wait to disappear.' },
     timeout: {

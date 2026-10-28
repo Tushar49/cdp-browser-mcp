@@ -418,6 +418,35 @@ function wireEventPipeline(serverCtx: ServerContext): void {
         applyWebMcpEvent(serverCtx, event.method, sessionId, params);
         break;
 
+      // ── WebAuthn credential events (5.3 WS4 — surfaced into list_credentials) ──
+      case 'WebAuthn.credentialAdded':
+      case 'WebAuthn.credentialUpdated':
+      case 'WebAuthn.credentialAsserted': {
+        const credential = params.credential as { credentialId?: string; signCount?: number } | undefined;
+        const kind = event.method === 'WebAuthn.credentialAdded' ? 'added' as const
+          : event.method === 'WebAuthn.credentialUpdated' ? 'updated' as const
+          : 'asserted' as const;
+        if (credential?.credentialId) {
+          serverCtx.webauthnState.noteCredentialEvent(
+            params.authenticatorId as string,
+            kind,
+            credential.credentialId,
+            credential.signCount,
+          );
+        }
+        break;
+      }
+      case 'WebAuthn.credentialDeleted': {
+        if (params.credentialId) {
+          serverCtx.webauthnState.noteCredentialEvent(
+            params.authenticatorId as string,
+            'deleted',
+            params.credentialId as string,
+          );
+        }
+        break;
+      }
+
       // ── Debugger events ──
       case 'Debugger.paused': {
         const pauseTs = Date.now();
