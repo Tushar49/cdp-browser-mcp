@@ -125,7 +125,14 @@ export async function handleWebMcpList(ctx: ServerContext, args: Record<string, 
 
   toolsFor(ctx, sess); // registry exists BEFORE enable (ordering lesson)
   await ctx.sendCommand('WebMCP.enable', {}, sess);
-  await new Promise((r) => setTimeout(r, 250));
+
+  // Briefly wait for the toolsAdded replay instead of a fixed settle:
+  // poll until the registry is non-empty or the deadline passes (review
+  // fix — a busy event bus can deliver the replay after a fixed wait).
+  const settleDeadline = Date.now() + 600;
+  while ((ctx.webmcpTools.get(sess)?.size ?? 0) === 0 && Date.now() < settleDeadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
 
   const tools = Array.from(ctx.webmcpTools.get(sess)?.values() ?? []);
   if (!tools.length) {
@@ -155,11 +162,14 @@ export async function handleWebMcpCall(ctx: ServerContext, args: Record<string, 
   const sess = await getTabSession(ctx, args.tabId as string);
   await requireWebMcp(ctx, sess);
 
+  // CDP convention: enable the domain before use (idempotent; review fix —
+  // an explicit frameId or a pre-populated registry must not skip this).
+  toolsFor(ctx, sess);
+  await ctx.sendCommand('WebMCP.enable', {}, sess);
+
   // frameId: from the registry, else the main frame
   let frameId = (args.frameId as string | undefined) ?? ctx.webmcpTools.get(sess)?.get(toolName)?.frameId;
   if (!frameId) {
-    toolsFor(ctx, sess);
-    await ctx.sendCommand('WebMCP.enable', {}, sess);
     frameId = ctx.webmcpTools.get(sess)?.get(toolName)?.frameId;
     if (!frameId) {
       const ft = (await ctx.sendCommand('Page.getFrameTree', {}, sess)) as {
