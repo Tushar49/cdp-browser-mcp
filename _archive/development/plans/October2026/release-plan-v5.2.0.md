@@ -375,7 +375,7 @@ on the demo RP, `dismiss` + `reset_cooldown`, pre-attach-dialog recovery.
 | 5 | WS2 FedCm dialog spike (demo RP) | **KILLED** | Brave disables the FedCM JS API — no dialog possible |
 | 6 | WS2 `fedcm` state + tool + tests + live | **cut with WS2** | — |
 | 7 | WS3 hygiene commits | 0.5 | live spot-checks |
-| 8 | WS4 intercept promotion (optional) | 0.25 | live |
+| 8 | WS4 intercept promotion (optional) | **done 2026-10-28** | E2E pass (pause→list→fulfill→mocked body rendered); 2 live-caught bugs fixed (dead list store; stale-session no-pause) |
 | 9 | Release: bump → promote (workflow!) → tag `v5.2.0` | 0.5 | pipeline |
 
 Totals: **≈5.0 sessions** (WS2 killed; E4/WS1/live done in-cycle). Interim commits after every item (conventional

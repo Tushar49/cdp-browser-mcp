@@ -3,7 +3,7 @@
 Zero-config browser access for CDP Browser MCP Server.
 
 ## Status: Scaffold (v0.1.0)
-This is the extension skeleton. The actual CDP bridge is planned for v5.1.0.
+This is the extension skeleton. The actual CDP bridge is planned for a future release.
 
 ## How It Will Work
 1. Install this extension in Chrome/Edge/Brave
