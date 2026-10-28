@@ -12,25 +12,31 @@ import { ok, fail } from '../utils/helpers.js';
 
 // ─── Auto-continue safety for stale paused requests ─────────────────
 
-/** Tracks paused requests: requestId → timestamp when paused */
-const pausedRequests = new Map<string, number>();
 const AUTO_CONTINUE_MS = 30_000;
 let safetyInterval: ReturnType<typeof setInterval> | null = null;
 let safetyCtx: ServerContext | null = null;
-let safetySess: string | null = null;
 
-function startSafetyInterval(ctx: ServerContext, sess: string): void {
+/**
+ * Auto-continue any request paused longer than AUTO_CONTINUE_MS so a page
+ * can't hang forever on an unhandled pause. The canonical paused-request
+ * store is `ctx.pendingFetchRequests` (fed by the event pipeline in
+ * index.ts) — keyed sessionId → requestId → info; this sweeps ALL
+ * sessions, since Fetch may be enabled on several tabs at once.
+ */
+function startSafetyInterval(ctx: ServerContext): void {
   // Only one interval at a time
   if (safetyInterval) return;
   safetyCtx = ctx;
-  safetySess = sess;
   safetyInterval = setInterval(() => {
+    if (!safetyCtx) return;
     const now = Date.now();
-    for (const [reqId, ts] of pausedRequests) {
-      if (now - ts > AUTO_CONTINUE_MS) {
-        pausedRequests.delete(reqId);
-        safetyCtx?.sendCommand('Fetch.continueRequest', { requestId: reqId }, safetySess ?? undefined)
-          .catch(() => { /* request may have been handled already */ });
+    for (const [, pending] of safetyCtx.pendingFetchRequests) {
+      for (const [reqId, info] of pending) {
+        if (now - info.ts > AUTO_CONTINUE_MS) {
+          pending.delete(reqId);
+          safetyCtx.sendCommand('Fetch.continueRequest', { requestId: reqId })
+            .catch(() => { /* request may have been handled already */ });
+        }
       }
     }
   }, 5_000);
@@ -41,9 +47,7 @@ function stopSafetyInterval(): void {
     clearInterval(safetyInterval);
     safetyInterval = null;
   }
-  pausedRequests.clear();
   safetyCtx = null;
-  safetySess = null;
 }
 
 // ─── Action handlers ────────────────────────────────────────────────
@@ -60,12 +64,19 @@ async function handleEnable(
     requestStage: 'Request',
   }));
 
+  // Defensive reset: a long-lived session can hold stale Fetch state
+  // (observed on Brave 153 after a tab crash — enable "succeeds" but never
+  // pauses); disable first so enable starts from a clean slate.
+  try {
+    await ctx.sendCommand('Fetch.disable', {}, sess);
+  } catch { /* not enabled yet — fine */ }
+
   await ctx.sendCommand('Fetch.enable', { patterns: fetchPatterns }, sess);
 
   // Start auto-continue safety interval
-  startSafetyInterval(ctx, sess);
+  startSafetyInterval(ctx);
 
-  return ok(`⚠️ Experimental: Request interception enabled.\nPatterns: ${patterns.join(', ')}\nPaused requests that aren't handled within 30s will be auto-continued to prevent page hangs.\nAlways call intercept.disable() when done.`);
+  return ok(`Request interception enabled.\nPatterns: ${patterns.join(', ')}\nPaused requests that aren't handled within 30s will be auto-continued to prevent page hangs.\nAlways call intercept.disable() when done.`);
 }
 
 async function handleDisable(
@@ -95,7 +106,8 @@ async function handleContinue(
     );
   }
 
-  pausedRequests.delete(params.requestId as string);
+  const pending = ctx.pendingFetchRequests.get(sess);
+  pending?.delete(params.requestId as string);
   await ctx.sendCommand('Fetch.continueRequest', cdpParams, sess);
   return ok(`Request ${params.requestId} continued${params.url ? ` (redirected to ${params.url})` : ''}.`);
 }
@@ -125,7 +137,8 @@ async function handleFulfill(
     cdpParams.body = Buffer.from(params.body as string).toString('base64');
   }
 
-  pausedRequests.delete(params.requestId as string);
+  const pending = ctx.pendingFetchRequests.get(sess);
+  pending?.delete(params.requestId as string);
   await ctx.sendCommand('Fetch.fulfillRequest', cdpParams, sess);
   return ok(`Request ${params.requestId} fulfilled with status ${responseCode}.`);
 }
@@ -138,7 +151,8 @@ async function handleFail(
   const sess = params._sessionId as string;
 
   const reason = (params.reason as string) || 'Failed';
-  pausedRequests.delete(params.requestId as string);
+  const pending = ctx.pendingFetchRequests.get(sess);
+  pending?.delete(params.requestId as string);
   await ctx.sendCommand('Fetch.failRequest', {
     requestId: params.requestId as string,
     reason,
@@ -151,21 +165,21 @@ async function handleList(
   ctx: ServerContext,
   params: Record<string, unknown>,
 ): Promise<ToolResult> {
-  void ctx;
-  void params;
+  const sess = params._sessionId as string | undefined;
+  const pending = (sess && ctx.pendingFetchRequests.get(sess)) || new Map();
 
-  if (pausedRequests.size === 0) {
+  if (pending.size === 0) {
     return ok('No pending intercepted requests.');
   }
 
   const now = Date.now();
-  const lines = [...pausedRequests.entries()].map(([reqId, ts]) => {
-    const age = ((now - ts) / 1000).toFixed(1);
-    const remaining = Math.max(0, (AUTO_CONTINUE_MS - (now - ts)) / 1000).toFixed(0);
-    return `  ${reqId} — paused ${age}s ago (auto-continue in ${remaining}s)`;
+  const lines = [...pending.entries()].map(([reqId, info]) => {
+    const age = ((now - info.ts) / 1000).toFixed(1);
+    const remaining = Math.max(0, (AUTO_CONTINUE_MS - (now - info.ts)) / 1000).toFixed(0);
+    return `  ${reqId} — ${info.method} ${info.url} — paused ${age}s ago (auto-continue in ${remaining}s)`;
   });
 
-  return ok(`${pausedRequests.size} paused request(s):\n${lines.join('\n')}`);
+  return ok(`${pending.size} paused request(s):\n${lines.join('\n')}`);
 }
 
 // ─── Registration ───────────────────────────────────────────────────
@@ -178,7 +192,7 @@ export function registerInterceptTools(
     defineTool({
       name: 'intercept',
       description: [
-        '⚠️ Experimental: Request interception requires careful use. Paused requests that aren\'t handled within 30s will be auto-continued to prevent page hangs. Always call intercept.disable() when done.',
+        'Request interception requires careful use. Paused requests that aren\'t handled within 30s will be auto-continued to prevent page hangs. Always call intercept.disable() when done.',
         '',
         'Operations:',
         "- enable: Start intercepting requests matching URL patterns (requires: tabId; optional: patterns — array of URL glob patterns, e.g. ['*.api.example.com/*'])",

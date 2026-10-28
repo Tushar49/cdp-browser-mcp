@@ -393,7 +393,9 @@ function wireEventPipeline(serverCtx: ServerContext): void {
         });
         serverCtx.pendingFetchRequests.set(sessionId, pending);
 
-        // Auto-continue after 10s to prevent hangs
+        // Auto-continue after 30s to prevent hangs (matches the intercept
+        // tool's documented window; shorter windows would race agents
+        // composing a fulfill call)
         setTimeout(async () => {
           if (pending.has(reqId)) {
             try {
@@ -401,7 +403,7 @@ function wireEventPipeline(serverCtx: ServerContext): void {
             } catch { /* ok */ }
             pending.delete(reqId);
           }
-        }, 10000);
+        }, 30000);
         break;
       }
 
