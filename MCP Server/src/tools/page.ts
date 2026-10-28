@@ -11,6 +11,7 @@ import { join, resolve, normalize } from 'path';
 import type { ToolResult, ServerContext } from '../types.js';
 import type { ToolRegistry } from './registry.js';
 import { defineTool } from './base-tool.js';
+import { resolveElement } from './interact.js';
 import { ok, fail } from '../utils/helpers.js';
 import { ActionableError, Errors, wrapError } from '../utils/error-handler.js';
 import { sleep, waitForReadyState, waitForText, waitForTextGone, waitForSelector } from '../utils/wait.js';
@@ -94,6 +95,11 @@ interface PageArgs {
   persistent?: boolean;
   // inject
   script?: string;
+  // verify (5.3 WS2)
+  check?: string;
+  value?: string;
+  mode?: 'exact' | 'prefix' | 'regex';
+  exact?: boolean;
   // screen recording (B6 S2)
   audio?: boolean;
   // bypass_csp
@@ -652,6 +658,176 @@ async function handleWait(ctx: ServerContext, args: PageArgs): Promise<ToolResul
   return fail(`Timed out (${timeout}ms) waiting for ${args.selector} [state: ${state}]`);
 }
 
+// ─── verify (5.3 WS2) ───────────────────────────────────────────────
+
+type VerifyCheck = 'visible' | 'text' | 'url' | 'enabled' | 'title' | 'value';
+
+const VERIFY_CHECKS: VerifyCheck[] = ['visible', 'text', 'url', 'enabled', 'title', 'value'];
+
+/** Same probe shape for uid (callFunctionOn on the resolved node) and selector (document.querySelector). */
+interface ElementProbe {
+  found: boolean;
+  visible?: boolean;
+  disabled?: boolean;
+  value?: string | null;
+  text?: string;
+}
+
+const ELEMENT_PROBE_FN = `function() {
+  if (!this) return { found: false };
+  let visible = false;
+  try { visible = this.getClientRects().length > 0 && getComputedStyle(this).visibility !== 'hidden' && getComputedStyle(this).display !== 'none'; } catch (e) { visible = false; }
+  return {
+    found: true,
+    visible,
+    disabled: this.disabled === true || this.getAttribute('aria-disabled') === 'true',
+    value: ('value' in this) ? String(this.value) : (this.getAttribute('value') ?? null),
+    text: (this.textContent || '').trim(),
+  };
+}`;
+
+function selectorProbeExpression(selector: string): string {
+  return `(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el) return { found: false };
+    let visible = false;
+    try { visible = el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none'; } catch (e) { visible = false; }
+    return {
+      found: true,
+      visible,
+      disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
+      value: ('value' in el) ? String(el.value) : (el.getAttribute('value') ?? null),
+      text: (el.textContent || '').trim(),
+    };
+  })()`;
+}
+
+async function evalValue(ctx: ServerContext, sess: string, expression: string): Promise<unknown> {
+  const r = (await ctx.sendCommand('Runtime.evaluate', { expression, returnByValue: true }, sess)) as {
+    result?: { value?: unknown };
+  };
+  return r.result?.value;
+}
+
+async function elementProbe(ctx: ServerContext, sess: string, args: PageArgs): Promise<ElementProbe> {
+  if (args.uid !== undefined) {
+    const el = await resolveElement(ctx, sess, args.uid, undefined, args.tabId);
+    // Route to the OOP-frame child session when this uid lives in one (mirrors interact)
+    const elemSess = ctx.tabSessions.getRefSession(sess, args.uid) ?? sess;
+    const r = (await ctx.sendCommand('Runtime.callFunctionOn', {
+      functionDeclaration: ELEMENT_PROBE_FN,
+      objectId: el.objectId,
+      returnByValue: true,
+    }, elemSess)) as { result?: { value?: ElementProbe } };
+    return r.result?.value ?? { found: false };
+  }
+  if (args.selector) {
+    return ((await evalValue(ctx, sess, selectorProbeExpression(args.selector))) as ElementProbe) ?? { found: false };
+  }
+  throw new Error("Provide 'uid' or 'selector' to identify the element.");
+}
+
+async function runVerifyCheck(
+  ctx: ServerContext,
+  sess: string,
+  check: VerifyCheck,
+  args: PageArgs,
+  expected: string,
+): Promise<{ pass: boolean; actual: string }> {
+  switch (check) {
+    case 'url': {
+      const href = String((await evalValue(ctx, sess, 'location.href')) ?? '');
+      const mode = args.mode || 'exact';
+      let pass: boolean;
+      if (mode === 'prefix') pass = href.startsWith(expected);
+      else if (mode === 'regex') {
+        try { pass = new RegExp(expected).test(href); } catch { pass = false; }
+      } else pass = href === expected;
+      return { pass, actual: href };
+    }
+    case 'title': {
+      const title = String((await evalValue(ctx, sess, 'document.title')) ?? '');
+      return { pass: title === expected, actual: title };
+    }
+    case 'text': {
+      let pageText: string;
+      if (args.uid !== undefined || args.selector) {
+        const p = await elementProbe(ctx, sess, args);
+        if (!p.found) return { pass: false, actual: 'element not found' };
+        pageText = p.text ?? '';
+      } else {
+        pageText = String((await evalValue(ctx, sess, 'document.body ? document.body.innerText : ""')) ?? '');
+      }
+      const pass = args.exact ? pageText === expected : pageText.includes(expected);
+      return { pass, actual: pageText.substring(0, 120) };
+    }
+    case 'visible': {
+      const p = await elementProbe(ctx, sess, args);
+      if (!p.found) return { pass: false, actual: 'element not found' };
+      return { pass: p.visible === true, actual: p.visible ? 'visible' : 'hidden' };
+    }
+    case 'enabled': {
+      const p = await elementProbe(ctx, sess, args);
+      if (!p.found) return { pass: false, actual: 'element not found' };
+      return { pass: p.disabled === false, actual: p.disabled ? 'disabled' : 'enabled' };
+    }
+    case 'value': {
+      const p = await elementProbe(ctx, sess, args);
+      if (!p.found) return { pass: false, actual: 'element not found' };
+      return { pass: p.value === expected, actual: p.value === null || p.value === undefined ? 'no value' : String(p.value) };
+    }
+  }
+}
+
+/**
+ * 5.3 WS2: cheap pass/fail checks so agents stop pulling full snapshots to
+ * confirm outcomes. Token-tiny result, never a snapshot. Default instant;
+ * with `timeout` set, polls (300ms) until pass or deadline — doubles as a
+ * post-action settle check. FAIL is a legitimate answer, not an error.
+ */
+export async function handleVerify(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
+  const check = args.check as VerifyCheck | undefined;
+  if (!check || !VERIFY_CHECKS.includes(check)) {
+    return fail(`Provide 'check' — one of: ${VERIFY_CHECKS.join(', ')}.`);
+  }
+  const needsElement = check === 'visible' || check === 'enabled';
+  if (needsElement && args.uid === undefined && !args.selector) {
+    return fail(`Provide 'uid' or 'selector' for the ${check} check.`);
+  }
+  const expected = args.value ?? args.text ?? '';
+  if (!needsElement && expected === '') {
+    return fail(`Provide 'value' (the expected ${check}).`);
+  }
+
+  const sess = await getTabSession(ctx, args.tabId);
+  const timeout = Math.min(args.timeout || 0, 60000);
+  const deadline = timeout > 0 ? Date.now() + timeout : 0;
+
+  let attempts = 0;
+  let last = { pass: false, actual: '' };
+  for (;;) {
+    attempts++;
+    try {
+      last = await runVerifyCheck(ctx, sess, check, args, expected);
+    } catch (e) {
+      last = { pass: false, actual: e instanceof Error ? e.message : String(e) };
+    }
+    if (last.pass || !deadline || Date.now() >= deadline) break;
+    await sleep(Math.min(300, deadline - Date.now()));
+  }
+
+  const pollNote = attempts > 1 ? ` (${attempts} attempts, ${timeout}ms budget)` : '';
+  if (last.pass) return ok(`PASS — ${check}: ${last.actual}${pollNote}`);
+
+  let expectedText: string;
+  if (check === 'url') expectedText = `${args.mode || 'exact'}: ${expected}`;
+  else if (check === 'text') expectedText = args.exact ? `exact "${expected}"` : `"${expected}"`;
+  else expectedText = `"${expected}"`;
+  return {
+    content: [{ type: 'text', text: `FAIL — expected: ${expectedText}, actual: ${last.actual}${pollNote}` }],
+  };
+}
+
 async function handlePdf(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
   await ensureDomain(ctx, sess, 'Page');
@@ -1015,6 +1191,7 @@ const PAGE_ACTIONS: Record<string, (ctx: ServerContext, args: PageArgs) => Promi
   find: handleFind,
   find_next: handleFindNext,
   find_stop: handleFindStop,
+  verify: handleVerify,
   record_start: handleRecordStart,
   record_stop: handleRecordStop,
 };
@@ -1039,6 +1216,7 @@ const PAGE_DESCRIPTION = [
   "- set_content: Set the page's HTML content directly (requires: tabId, html)",
   '- record_start / record_stop: Record the tab screen to an MP4 video (experimental; requires: tabId; record_start optional: audio[default false]; record_stop optional: path — absolute file path, else temp file)',
   "- wait: Wait for condition or fixed delay (requires: tabId; provide text, textGone, selector for polling — or just timeout for fixed delay; optional: timeout[ms], state[visible|hidden|attached|detached] for selector waits)",
+  '- verify: Cheap pass/fail check — token-tiny PASS/FAIL result, never a snapshot (requires: tabId; check[visible|text|url|enabled|title|value]; visible/enabled need uid or selector; text needs value (substring, or exact:true); url needs value (mode[exact|prefix|regex]); title/value need value; optional: timeout[ms] — polls until pass or deadline, default instant)',
   '- pdf: Export page as PDF to temp file (requires: tabId; optional: landscape, scale, paperWidth, paperHeight, margin{top,bottom,left,right})',
   '- dialog: Handle a pending JavaScript dialog (alert/confirm/prompt) (requires: tabId; optional: accept[default:true], text for prompt response)',
   '- inject: Inject a script that runs on every new document load (requires: tabId, script)',
@@ -1127,6 +1305,24 @@ const PAGE_INPUT_SCHEMA = {
       description: 'If true, style persists across page navigations (default: false). For add_style action.',
     },
     script: { type: 'string' as const, description: 'Script for inject action.' },
+    check: {
+      type: 'string' as const,
+      enum: ['visible', 'text', 'url', 'enabled', 'title', 'value'] as const,
+      description: 'verify action: which check to run.',
+    },
+    value: {
+      type: 'string' as const,
+      description: "verify action: expected value (url/title/value), or the expected text for check:text. Aliased by 'text' for the text check.",
+    },
+    mode: {
+      type: 'string' as const,
+      enum: ['exact', 'prefix', 'regex'] as const,
+      description: "verify action: url check match mode (default: exact).",
+    },
+    exact: {
+      type: 'boolean' as const,
+      description: 'verify action: text check exact-match instead of substring (default: false).',
+    },
     enabled: { type: 'boolean' as const, description: 'Enable/disable for bypass_csp.' },
     sessionId: {
       type: 'string' as const,
