@@ -38,7 +38,7 @@ CDP Browser MCP Server connects to your **already-running** browser over a WebSo
 | Browser Use needs Python + LLM key | Heavy framework, double LLM cost |
 | BrowserTools MCP is read-only | Can observe but can't automate |
 
-**This server**: connects to Chrome on `localhost:9222`, uses the real browser state, and gives you **90+ automation actions** across 14 tools — built as a modular TypeScript codebase with 2 dependencies. Geolocation spoofing automatically grants browser permissions so permission-based sites just work.
+**This server**: connects to Chrome on `localhost:9222`, uses the real browser state, and gives you **100+ automation actions** across 15 tools — built as a modular TypeScript codebase with 2 dependencies. Geolocation spoofing automatically grants browser permissions so permission-based sites just work.
 
 ---
 
@@ -77,7 +77,7 @@ CDP Browser MCP Server connects to your **already-running** browser over a WebSo
 | Connects to real browser | **Yes** | Via flag only | No (cloud) | No | Read-only |
 | Preserves cookies/sessions | **Yes** | No | No | No | Yes |
 | Works with extensions | **Yes** | No | No | No | Yes |
-| Tool count | **14 tools, 90+ actions** | ~30 tools | ~10 tools | 7 tools | ~13 tools |
+| Tool count | **15 tools, 100+ actions** | ~30 tools | ~10 tools | 7 tools | ~13 tools |
 | Auto-connect | **Yes** (first tool call) | No | N/A | No | No |
 | Auto-waiting after actions | **Yes** | Yes | Yes | No | N/A |
 | Smart form filling | **Yes** (combobox, React Select) | Native `<select>` only | Via AI | No | No |
@@ -305,6 +305,7 @@ When a connection fails, the server auto-detects the failure mode and prints the
 | `observe` | 7 | Console messages, network requests, performance metrics, memory counters, downloads, HAR export |
 | `emulate` | 15 | Viewport, color scheme, geolocation, network throttling, timezone, vision deficiency, device posture, CPU performance tier |
 | `storage` | 9 | Cookie CRUD, localStorage/sessionStorage management, storage clearing, quota inspection |
+| `webauthn` | 11 | Passkey testing with virtual authenticators — create/inject credentials, presence + UV simulation, negative-testing override bits |
 | `intercept` | 6 | HTTP request interception — mock, modify, block network requests |
 | `cleanup` | 7 | Session management, disconnect, temp file cleanup, reset |
 | `browser` | 3 | Chrome/Edge/Brave instance detection, profile listing, connection switching |
@@ -445,6 +446,29 @@ Set any combination of properties in a single call:
 | `get_storage` | Read localStorage/sessionStorage (whole object as JSON when `key` omitted) | `tabId` | `key`, `storageType`(`local`\|`session`) |
 | `set_storage` | Write a localStorage/sessionStorage key | `tabId`, `key`, `value` | `storageType`(`local`\|`session`) |
 | `delete_storage` | Remove a key, or clear the whole storage area when `key` omitted | `tabId` | `key`, `storageType`(`local`\|`session`) |
+
+### `webauthn` — Passkey Testing with Virtual Authenticators *(NEW in v5.2.0)*
+
+Test passkey flows without a real security key. Create a virtual authenticator
+on a tab, then drive the page normally — the browser intercepts
+`navigator.credentials.create/get` and the authenticator auto-responds.
+Authenticators live in CDP memory only: nothing touches the user's real
+keyring, and they die with the connection or tab. Create the authenticator
+BEFORE the page runs its WebAuthn calls.
+
+| Action | Description | Required | Optional |
+|--------|-------------|----------|----------|
+| `add_authenticator` | Create a virtual authenticator (defaults: ctap2/internal, resident keys, UV verified, auto-presence — a platform passkey that approves everything; re-enables the virtual environment automatically) | `tabId` | `protocol`(`ctap2`\|`u2f`), `transport`(`internal`\|`usb`\|`nfc`\|`ble`\|`cable`\|`hybrid`\|`smart-card`), `hasResidentKey`, `hasUserVerification`, `isUserVerified`, `automaticPresenceSimulation`, `ctap2Version`, `extensions`{`prf`,`largeBlob`,`credBlob`,`minPinLength`,`hmacSecret`,`cmtgKey`} |
+| `remove_authenticator` | Remove an authenticator | `authenticatorId` | — |
+| `list_authenticators` | List authenticators created by this server | — | — |
+| `add_credential` | Inject a pre-made credential (privateKey = PKCS#8 DER of an ECDSA P-256 key, base64) | `authenticatorId`, `credentialId`(b64), `privateKey`(b64), `rpId` | `userHandle`(b64), `isResidentCredential`, `signCount`, `largeBlob`(b64), `backupEligibility`, `backupState`, `userName`, `userDisplayName` |
+| `list_credentials` | List credentials stored on an authenticator | `authenticatorId` | — |
+| `remove_credential` | Remove one credential | `authenticatorId`, `credentialId` | — |
+| `clear_credentials` | Remove all credentials | `authenticatorId` | — |
+| `set_user_verified` | Make user verification succeed/fail (fail = sites requiring UV get NotAllowedError) | `authenticatorId` | `isUserVerified` (default true) |
+| `set_presence_simulation` | Auto-approve or hang user-presence tests (hang = test timeout paths) | `authenticatorId` | `enabled` (default true) |
+| `set_override_bits` | Negative testing — sabotage the next response: zero signature / UV flag / UP flag | `authenticatorId` | `isBogusSignature`, `isBadUV`, `isBadUP` |
+| `reset` | Remove ALL authenticators on a tab + disable the environment | `tabId` | — |
 
 ### `intercept` — HTTP Request Interception
 
@@ -641,7 +665,7 @@ WebSocket ping/pong every 30 seconds. If 2 consecutive pings fail, the connectio
 
 ## Slim Mode
 
-For models with small context windows (32K or less), enable **Slim Mode** to reduce the tool surface from 14 tools (~8KB of schemas) to just 6 essential tools (~1.5KB):
+For models with small context windows (32K or less), enable **Slim Mode** to reduce the tool surface from 15 tools (~8KB of schemas) to just 6 essential tools (~1.5KB):
 
 ```json
 {

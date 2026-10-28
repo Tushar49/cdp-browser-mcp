@@ -14,6 +14,7 @@ import type { TabSessionService } from './connection/tab-session-service.js';
 import type { SessionManager } from './session/session-manager.js';
 import type { TabOwnership } from './session/tab-ownership.js';
 import type { ModalStateManager } from './session/modal-state.js';
+import type { WebAuthnStateManager } from './session/webauthn-state.js';
 import type { SnapshotCache } from './snapshot/cache.js';
 import type { ElementResolver } from './snapshot/element-resolver.js';
 
@@ -283,6 +284,9 @@ export interface ServerContext {
 
   /** Tracks tab-level modal states (dialogs, file choosers, debugger pauses). */
   modalStates: ModalStateManager;
+
+  /** WebAuthn virtual-authenticator registry (ownership/routing only — 5.2 WS1). */
+  webauthnState: WebAuthnStateManager;
 
   /** Per-process fallback session ID. */
   processSessionId: string;

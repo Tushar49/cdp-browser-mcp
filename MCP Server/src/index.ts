@@ -57,6 +57,8 @@ import { registerCleanupTools } from './tools/cleanup.js';
 import { registerBrowserTools } from './tools/browser.js';
 import { registerDebugTools } from './tools/debug.js';
 import { registerFormTools } from './tools/form.js';
+import { registerWebauthnTools } from './tools/webauthn.js';
+import { WebAuthnStateManager } from './session/webauthn-state.js';
 import { getSlimTools, mapSlimToFull } from './tools/slim-mode.js';
 
 // ─── Bootstrap ──────────────────────────────────────────────────────
@@ -96,6 +98,7 @@ cdpClient.on('disconnected', () => {
   snapshotCache.clear();
   capabilities.clear();
   tabSessionService.clear();
+  ctx.webauthnState.clearAll();
   healthMonitor.onDisconnect().catch(() => {
     // Reconnect failed — next tool call will trigger autoConnect
   });
@@ -453,6 +456,18 @@ function wireEventPipeline(serverCtx: ServerContext): void {
         }
         break;
       }
+
+      case 'Target.targetDestroyed': {
+        // Tab gone (user closed it, crash, or programmatic close) — drop its
+        // WebAuthn registry entries. Deliberately NOT cleared on
+        // detachedFromTarget: detach keeps the tab and its browser-side
+        // authenticators alive, and the registry is the only source of truth.
+        const destroyedTargetId = params.targetId as string | undefined;
+        if (destroyedTargetId) {
+          serverCtx.webauthnState.clearForTab(destroyedTargetId);
+        }
+        break;
+      }
     }
   });
 }
@@ -471,6 +486,7 @@ const ctx: ServerContext = {
   sessions: new SessionManager(),
   tabOwnership: new TabOwnership(),
   modalStates: new ModalStateManager(),
+  webauthnState: new WebAuthnStateManager(),
   processSessionId: randomUUID(),
   snapshotCache,
   elementResolvers: new Map(),
@@ -594,7 +610,7 @@ if (config.slimMode) {
   registerInteractTools(registry, ctx);
   registerFormTools(registry, ctx);
 } else {
-  // Full mode: all 14 tools
+  // Full mode: all 15 tools
   registerTabsTools(registry, ctx);
   registerPageTools(registry, ctx);
   registerInteractTools(registry, ctx);
@@ -607,6 +623,7 @@ if (config.slimMode) {
   registerBrowserTools(registry, ctx);
   registerDebugTools(registry, ctx);
   registerFormTools(registry, ctx);
+  registerWebauthnTools(registry, ctx);
 }
 
 // ─── MCP Server─────────────────────────────────────────────────────
@@ -615,7 +632,7 @@ const server = new Server(
   { name: 'cdp-browser', version: VERSION },
   {
     capabilities: { tools: {} },
-    instructions: `CDP Browser MCP attaches your REAL running browser (cookies, logins, extensions stay). 14 tools: tabs, page, interact, form, execute, observe, emulate, storage, intercept, debug, browser, cleanup, ping, status. The browser connects automatically on the first browser-tool call - ping/status may say Connected: false before that; just call any browser tool.
+    instructions: `CDP Browser MCP attaches your REAL running browser (cookies, logins, extensions stay). 15 tools: tabs, page, interact, form, execute, observe, emulate, storage, intercept, debug, browser, cleanup, webauthn, ping, status. The browser connects automatically on the first browser-tool call - ping/status may say Connected: false before that; just call any browser tool.
 
 CALLING CONVENTION (critical): every tool is ONE tool with an action enum parameter - there are NO per-action subtools. Call like tools["cdp-browser"].tabs({ action: "list" }), tools["cdp-browser"].page({ action: "goto", tabId, url }), tools["cdp-browser"].interact({ action: "click", tabId, uid }). WRONG: tabs.list(), tabs(), page.goto(url) - these tool names do not exist and fail schema validation. If unsure of an action or parameter, read the tool's description/enum first; tabs without action defaults to listing. Two connection modes: launch flag (--remote-debugging-port + explicit --user-data-dir) or the browser built-in chrome://inspect/#remote-debugging toggle (a permission dialog appears - click Allow).`,
   },

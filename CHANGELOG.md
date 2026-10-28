@@ -8,6 +8,9 @@ All notable changes to CDP Browser MCP Server will be documented in this file.
 - repo-infra: the "Promote dev to main" workflow now verifies the promote commit carries no dev-only material BEFORE pushing (hard fail instead of a log line), and the agent guide documents the concrete manual-flow verification plus a "never tag past a red Guard main" rule — both learned from the v5.1.0 release race. No package changes.
 - errors: `DomainUnsupportedError` is now a first-class class (thrown by `capabilities.require`) and `wrapError` converts it into an actionable result with fix + domain context — unsupported-feature failures no longer fall through to the generic error text. First step of the 5.2.0 plan (WS3-E4).
 
+### Added
+- webauthn: **passkey testing with virtual authenticators** — new `webauthn` tool (11 actions) over the CDP WebAuthn domain: `add_authenticator`/`remove_authenticator`/`list_authenticators` (zero-config defaults: ctap2/internal, resident keys, UV verified, auto-presence — a platform passkey that approves everything), `add_credential`/`list_credentials`/`remove_credential`/`clear_credentials` (inject pre-made credentials; PKCS#8 base64 in), `set_user_verified`, `set_presence_simulation`, `set_override_bits` (negative testing — zero the signature/UV/UP flags), `reset` (per-tab wipe). Authenticator commands route through the OWNING tab's session (resolved live); registry state cleans up on tab close and disconnect. Virtual authenticators are CDP-memory-only — nothing touches the user's real keyring. Live-verified groundwork: WS0 spike confirmed enable/create/list/UV flows on Brave 153, including Chromium's one-internal-authenticator limit (surfaced as an actionable error listing existing internal authenticators).
+
 ## [5.1.0] - 2026-10-27
 
 ### Added

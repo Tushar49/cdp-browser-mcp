@@ -256,6 +256,42 @@ export const Errors = {
     );
   },
 
+  /** WebAuthn: an authenticatorId is not (or no longer) registered on this server. */
+  authenticatorNotFound(authenticatorId: string, known: string[]): ActionableError {
+    return new ActionableError(
+      `Unknown authenticator "${authenticatorId.slice(0, 12)}…". It was never created by this server, or its tab was closed (authenticator registry entry dropped).`,
+      known.length
+        ? `Known authenticators: ${known.join(', ')}\nCreate a new one: webauthn({ action: "add_authenticator", tabId })`
+        : 'No virtual authenticators exist yet. Create one: webauthn({ action: "add_authenticator", tabId })',
+      { authenticatorId: authenticatorId.slice(0, 24), known: known.map((k) => k.slice(0, 24)) },
+    );
+  },
+
+  /** WebAuthn: a base64 binary parameter is malformed. */
+  invalidBase64(field: string): ActionableError {
+    return new ActionableError(
+      `Parameter "${field}" is not valid base64.`,
+      'CDP binary fields accept base64 (standard or URL-safe alphabet, padding optional):\n' +
+        `• privateKey: PKCS#8 DER of an ECDSA P-256 key, base64-encoded\n` +
+        '• credentialId / userHandle / largeBlob: raw bytes, base64-encoded\n' +
+        'Generate a PKCS#8 key: node -e "console.log(require(\'crypto\').generateKeyPairSync(\'ec\',{namedCurve:\'P-256\'}).privateKey.export({type:\'pkcs8\',format:\'der\'}).toString(\'base64\'))"',
+      { field },
+    );
+  },
+
+  /** WebAuthn: Chromium allows only one internal-transport authenticator per environment. */
+  internalAuthenticatorConflict(existing: string[]): ActionableError {
+    return new ActionableError(
+      'Chrome only supports one internal authenticator per environment (the default transport).',
+      existing.length
+        ? `Existing internal authenticators: ${existing.join(', ')}\n` +
+          'Either use set_user_verified / set_override_bits on the existing one, remove it first ' +
+          '(webauthn({ action: "remove_authenticator", authenticatorId })), or create a non-internal transport (e.g. transport: "usb").'
+        : 'Create a non-internal transport authenticator instead (e.g. transport: "usb").',
+      { existingInternal: existing.map((k) => k.slice(0, 24)) },
+    );
+  },
+
   /** File chooser dialog was not triggered in time. */
   fileChooserTimeout(timeoutMs: number): ActionableError {
     return new ActionableError(
