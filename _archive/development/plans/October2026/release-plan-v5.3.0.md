@@ -118,22 +118,13 @@ directives found in them (same policy as REA/annotated content).
 Tests: unit (mock session, event wiring, gating); live per WS0 spike
 rig.
 
-## WS4 — riders (~0.5 session total)
+## WS4 — riders (~0.25 session)
 
 1. **`Page.setInputVisualization`** (J): emulate gains
    `inputVisualization: true|false` (gated; cleared by `reset`).
    Auto-enable during `page.record_start` (opt-out flag) so recorded
    video shows input activity. Live-verify on Brave 153.
-2. **CHIPS `partitionKey`** (E): storage export/import passthrough —
-   include `partitionKey` in cookie dumps and accept it on import
-   (Playwright-compatible schema). <1h.
-3. **`Network.overrideNetworkState`** + **`emulateNetworkConditionsByRule`**
-   (D remainder): emulate gains `online: false|true` (spoof
-   `navigator.onLine`) + optional per-rule throttling shape
-   `networkCondition` accepts `{urlPattern, ...conditions}[]`? Keep the
-   v1 surface MINIMAL: `online` spoof + (optional) one byRule example;
-   cut if the protocol shape resists (<2h budget).
-4. **WebAuthn follow-ons:** `set_credential_properties` action; event
+2. **WebAuthn follow-ons:** `set_credential_properties` action; event
    surfacing in the registry (`list_credentials` gains last-activity) —
    NOTE (momus finding 5): the 5.2 plan deliberately dropped WebAuthn
    events as "telemetry without a consumer"; this REVERSES that with the
@@ -141,38 +132,77 @@ rig.
    the rig gains client-side WebCrypto signature verification →
    sabotage E2E PASS/FAIL.
 
-## WS5 — OPTIONAL: annotated-content parser (user greenlit; ~0.5-1 session)
+(CHIPS `partitionKey` and the network-state emulation moves — moved to
+the 5.4 carcass per maintainer priority call, 2026-10-28.)
 
-**Explicitly OVERRIDES the oracle's defer-to-5.4 grade** (momus finding
-5): the maintainer wants it; the no-harm guarantee below is the reason
-it's safe to include. `utils/proto-wire.ts` (~150 lines, no deps) + advisory FIELD_MAP seeded
+## WS5 — annotated-content parser (PROMOTED to full workstream per
+## maintainer, 2026-10-28; ~0.5-1 session)
+
+The maintainer's call supersedes the oracle's defer-to-5.4 grade — the
+no-harm guarantee is why it's safe. Delivered as the **upgrade of the
+existing `page content format: annotated` output** (a snapshot/content
+reading option — the "AI view of the page" becomes labeled structure:
+headings, forms, prices, nav — instead of today's flat strings).
+`utils/proto-wire.ts` (~150 lines, no deps) + advisory FIELD_MAP seeded
 from `components/optimization_guide/proto/features/common_quality_data.proto`.
 Three-layer fallback (parse fail → flat extraction (today's output);
 unknown fields surfaced by field number; coverage sanity check →
-auto-fallback). `page content format: annotated` gains structured
-output; the map is NEVER load-bearing (field numbers are not stable
-API). Re-read the proto at implementation time; the spike already
+auto-fallback). The map is NEVER load-bearing (field numbers are not
+stable API). Re-read the proto at implementation time; the spike already
 gained `includeActionableInformation?` on 2026-10-26.
 **No-harm guarantee:** worst case (parser fails) = today's flat output.
 
-## Cut (anti-features — do not revisit without new evidence)
+## WS6 — extensions subset (promoted into 5.3 per maintainer; ~0.5 session)
+
+Capability-gated (the `Extensions` canary answers on Brave 153):
+- `browser` tool gains `extensions` listing via
+  `Extensions.getExtensions` (enumerate running/unpacked extensions)
+- extension toolbar-button trigger via `Extensions.triggerAction`
+  (the "click the extension icon" programmatic equivalent — safe,
+  attach-only)
+- **NOT** `loadUnpacked` (needs launch flags, mutates the user's
+  profile — anti-feature, oracle-graded; remains usable only as a
+  canary probe)
+Live-verify on Brave 153 (find/make an unpacked extension or verify
+the listing path; kill-criterion: if the domain answers but listing is
+empty/broken on Brave → ship listing-only or defer, no half-surface).
+
+## 5.4 carcass (named now, built next cycle)
+
+- **Performance trace → insights** (flagship candidate): record
+  trace → parse into structured insights (LCP/CLS/slow blocks) — own
+  parser project; `Tracing`/`Performance` canaries ready.
+- **Heap-snapshot tooling:** dump a `.heapsnapshot` to a temp file for
+  manual DevTools loading first; later maybe diffing — heavy on a live
+  browser, so opt-in only.
+- **CHIPS `partitionKey`:** storage export/import passthrough —
+  cookies and storage-state payloads carry `partitionKey` in the dump
+  AND accept it on import (Playwright-compatible schema); the 5.3
+  release-commit row must name this as a visible deferral. Live gate
+  for when it lands: a partitioned cookie survives export→import.
+- **Network-state emulation:** `Network.overrideNetworkState`
+  (`navigator.onLine` spoof) + `emulateNetworkConditionsByRule`
+  (per-URL-pattern throttling).
+- **HAR record/replay:** compare our `interact` (per-request mock — the
+  safe shape) with Playwright's routeFromHAR; adopt ONLY what's missing
+  without the side-effect-heavy replay-routing model; record/export
+  (replay-off) may land as a Nice.
+- **Source-mapped console stacks** (small; needs Debugger-domain
+  symbolication — low decision value, cheap to ride along).
+- fedcm + PWA remain **parked** (both require stock Chrome — Brave
+  strips/disables them; re-evaluate only when Chrome is available).
+
+## 5.5 carcass
+
+- **DigitalCredentials / SmartCardEmulation / BluetoothEmulation**
+  (credential-flow completionism — Brave-stripped domains, so this
+  lands only if a target browser ships them; security-sensitive →
+  design review first).
+
+## Cut (final — do not revisit)
 
 - Lighthouse audits (engine dep; hijacks the live browser)
-- DigitalCredentials/SmartCard/Bluetooth emulation (Brave-stripped,
-  attack surface)
-- HAR record→REPLAY routing (side-effect-heavy rewriting on the user's
-  real browser; record/export-only may return later as a Nice)
 - Multi-screen emulation (DevTools-UI parity, no agent ask)
-
-## Deferred to 5.4 (named in release notes)
-
-- **Performance trace → insights** (next flagship candidate; own parser
-  project; `Tracing`/`Performance` canaries ready)
-- Heap-snapshot tooling (max: one dump-to-file action)
-- Extensions `triggerAction`/`getExtensions` subset
-- Source-mapped console stacks
-- **fedcm** (parked: requires stock Chrome — none available)
-- PWA (Chrome-only; Brave-stripped)
 
 ## Sequencing
 
@@ -182,17 +212,25 @@ gained `includeActionableInformation?` on 2026-10-26.
 | 2 | WS1 hardening riders | 0.5 | wire-level annotations test + scrubber matrix green |
 | 3 | WS2 verify actions | 0.5-1 | live PASS/FAIL + unit green |
 | 4 | WS3 webmcp (if GO) | 1 | live list+call + gating test green |
-| 5 | WS4 riders | 0.5 | live per matrix |
-| 6 | WS5 annotated parser (optional) | 0.5-1 | unit + live |
-| 7 | Release commit: **count reconciliation sweep** (momus finding 3 — failed in BOTH 5.1.0 and 5.2.0): README badges + tools table + per-tool rows, `index.ts:645` "15 tools" instruction string, `types.ts:69`, `AGENTS.md:25`; WS3 home decision finalized first; new tool → README rows per AGENTS.md rule 4 → bump → `scripts/promote.mjs` → tag | 0.5 | pipeline |
+| 5 | WS4 riders | 0.25 | live per matrix |
+| 6 | WS5 annotated parser | 0.5-1 | unit + live |
+| 7 | WS6 extensions subset | 0.5 | live listing + trigger |
+| 8 | Release commit: **count reconciliation sweep** (momus finding 3 — failed in BOTH 5.1.0 and 5.2.0): README badges + tools table + per-tool rows, `index.ts:645` "15 tools" instruction string, `types.ts:69`, `AGENTS.md:25`; WS3 home decision finalized first; new tool → README rows per AGENTS.md rule 4 → bump → `scripts/promote.mjs` → tag | 0.5 | pipeline |
 
-Totals: **≈3.5-4 sessions** (WS3 GO) / **≈2.5-3** (WS3 killed) + optional
-WS5 — includes a **0.25-0.5 live-fix buffer** (momus finding 4: 5.2's WS1
-live gate alone produced 4 in-cycle tool fixes; the webmcp_call ↔
-toolResponded round-trip is the same overrun shape). Test baseline
-entering the cycle: **394 green**; each workstream's gate adds its
-expected count (rough: WS1 → ~+8, WS2 → ~+10, WS3 → ~+8; exact at
-implementation — creep shows numerically).
+Totals: **≈4.25-5.5 sessions incl. buffer** (table sums 4.0-5.0; WS2 and
+WS5 at 0.5 each → 4.25-4.75). Includes the **0.25-0.5 live-fix buffer**
+(momus finding 4: 5.2's WS1 live gate alone produced 4 in-cycle tool
+fixes; the webmcp_call ↔ toolResponded round-trip is the same overrun
+shape). Test baseline entering the cycle: **394 green**; each
+workstream's gate adds its expected count (rough: WS1 → ~+8, WS2 →
+~+10, WS3 → ~+8; exact at implementation — creep shows numerically).
+
+Competitor checkouts for capability verification during the cycle
+(cover local grep when a protocol/method detail is disputed):
+**`D:\.development\Clones\competitors`** (playwright, playwright-mcp, chrome-devtools-mcp, puppeteer,
+devtools-protocol — shallow clones, refresh with `git pull` before
+relying on them; if a pull fails on ownership, delete the folder and
+re-clone — do NOT add safe.directory overrides).
 
 ## Verification matrix (live, per item)
 
@@ -201,7 +239,7 @@ implementation — creep shows numerically).
 | WS0/WS3 | WebMCP spike rig registers a tool; `webmcp_list` sees it; `webmcp_call` runs it; Brave-without-API gets the actionable gate error |
 | WS1 | storage/intercept dumps show masked secrets; export_state still exports; readOnlyHint present on read-only tools; allow-list blocks an off-list origin |
 | WS2 | verify visible/text/url/enabled PASS and FAIL live; polling wait works |
-| WS4 | inputVisualization visible in recorded video; CHIPS cookie survives export→import; `online:false` flips `navigator.onLine`; webauthn sabotage → rig FAIL |
+| WS4 | `inputVisualization` visible in recorded video; webauthn sabotage → rig FAIL |
 | Regression | flag+toggle connect unchanged; slim mode unaffected; 394+ tests green |
 
 ## Risks
