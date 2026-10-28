@@ -46,7 +46,7 @@ the **dev branch only** — it is deleted at every promote and never on main.
 | Change session/tab locking | `MCP Server/src/session/{session-manager,tab-ownership,modal-state}.ts` |
 | Change config surface | `MCP Server/src/config.ts` (only env reader) + `src/types.ts` |
 | Cut a release | Tag main (`v*`); release.yml builds + publishes. Never release from dev. |
-| Promote dev → main | Actions → "Promote dev to main" (or root AGENTS.md manual flow) |
+| Promote dev → main | `node scripts/promote.mjs <version>` — local, runs as the repo owner (Actions-based promote retired) |
 
 ## Commands
 
@@ -121,25 +121,30 @@ Never:
   so it never lands on main. If dev adds a *shared* rule, it belongs in
   `.main.gitignore`. `guard-main.yml` fails if `.main.gitignore` reappears
   on main.
-- **Promote flow (dev → main):** Actions → "Promote dev to main" workflow
-  (preferred — it hard-fails before push if dev-only paths survive),
-  or manually: `git merge --no-ff --no-commit origin/dev` →
-  sync `.gitignore` from `.main.gitignore` when it changed →
+- **Promote flow (dev → main): run the local script —
+  `node scripts/promote.mjs <version>` from the repo root on a clean
+  tree.** It runs the merge on the laptop (your credential manager = the
+  bypass-listed actor; a GitHub Actions runner can never push here —
+  main's ruleset blocks `github-actions[bot]` and the Actions app cannot
+  be added to a ruleset bypass list, so `.github/workflows/promote.yml`
+  was retired after the v5.2.0 promote saga). The script does: fetch →
+  `git merge --no-ff --no-commit origin/dev` → sync `.gitignore` from
+  dev's `.main.gitignore` shadow when it changed →
   `git rm -rf --ignore-unmatch _archive .research .githooks .main.gitignore .github/AGENTS.md .github/copilot-instructions.md`
   (bare `git rm -r` aborts as a unit when a pathspec matches nothing — e.g.
   dev tracks no `.research` — and without `-f` it refuses
   modify/delete-conflicted strays; both stranded files in the v5.2.0
-  promote attempt)
-  → restore main's `.gitignore` → **hard-verify before committing:**
+  promote attempt) → **hard-verify before committing:**
   `git ls-files _archive .research .githooks .main.gitignore .github/AGENTS.md .github/copilot-instructions.md`
   must print NOTHING, and `git status --short` must show no `_archive`/
   `.research` lines (watch for ` D` entries — files tracked in the merge
   but missing on disk mean the strip didn't take) →
-  commit `Merge dev → main: <version>`. `.gitignore` alone never blocks a
-  merge (it only affects untracked files) — deletion is explicit, policy
-  second. New files added on dev since the last promote land silently on
-  merge (the v5.1.0 promote shipped two `_archive` files this way) — the
-  promote workflow's pre-push check and `guard-main.yml` are the backstops.
+  commit `Merge dev → main: <version>` → push → restore your branch.
+  `.gitignore` alone never blocks a merge (it only affects untracked
+  files) — deletion is explicit, policy second. New files added on dev
+  since the last promote land silently on merge (the v5.1.0 promote
+  shipped two `_archive` files this way) — the script's pre-push check
+  and `guard-main.yml` are the backstops.
 - **Guard main red on a promote merge = HARD blocker:** strip the paths,
   re-push main, and only then tag/release. v5.1.0's first tag shipped from
   a guard-failing commit because the red X was missed while racing the
