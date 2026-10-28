@@ -450,7 +450,7 @@ export function registerStorageTools(
       includeSessionStorage: { type: 'boolean', description: 'export_state: also capture sessionStorage for the current origin (default false).' },
           exclusive: { type: 'boolean', description: 'Lock tab to this session (default: true). Set false to allow shared access.' },
         },
-        required: ['action', 'tabId'],
+        required: ['action'],
       },
       handler: async (ctx, params) => {
         const action = params.action as string;

@@ -14,12 +14,14 @@ import { resolvePinnedContextId } from '../session/profile-resolver.js';
 
 // ─── Action Handlers ────────────────────────────────────────────────
 
-async function handleList(
+export async function handleList(
   ctx: ServerContext,
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
   const sessionId = args._agentSessionId as string | undefined;
   let showAll = args.showAll as boolean | undefined;
+  const urlFilter = (args.urlFilter as string | undefined)?.toLowerCase();
+  const format = (args.format as string) || 'text';
 
   const targets = (await ctx.sendCommand('Target.getTargets', {
     filter: [{ type: 'page' }],
@@ -49,6 +51,31 @@ async function handleList(
     if (!tabs.length) return ok('No accessible tabs. Use showAll: true to see all browser tabs.');
   }
 
+  // Optional server-side URL substring filter (agent-DX E6)
+  if (urlFilter) {
+    tabs = tabs.filter((t) => String(t.url ?? '').toLowerCase().includes(urlFilter));
+    if (!tabs.length) return ok(`No tabs with URL containing "${args.urlFilter}".`);
+  }
+
+  if (format === 'json') {
+    return ok(JSON.stringify(
+      tabs.map((t) => {
+        const lock = ctx.tabOwnership.getLock(t.targetId as string);
+        return {
+          id: t.targetId,
+          url: t.url,
+          title: t.title,
+          profile: t.browserContextId ? String(t.browserContextId).substring(0, 8) : undefined,
+          lockedBy: lock?.sessionId && lock.sessionId !== sessionId
+            ? lock.sessionId.substring(0, 8) + '…'
+            : undefined,
+        };
+      }),
+      null,
+      2,
+    ));
+  }
+
   const lines = tabs.map((t, i) => {
     const targetId = t.targetId as string;
     const title = t.title as string;
@@ -72,7 +99,7 @@ async function handleList(
   return ok(`${prefix}${tabs.length} tab(s):\n\n${lines.join('\n\n')}`);
 }
 
-async function handleFind(
+export async function handleFind(
   ctx: ServerContext,
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
@@ -108,6 +135,25 @@ async function handleFind(
     } else {
       hits = filtered;
     }
+  }
+
+  if ((args.format as string) === 'json') {
+    return ok(JSON.stringify(
+      hits.map((t) => {
+        const lock = ctx.tabOwnership.getLock(t.targetId as string);
+        return {
+          id: t.targetId,
+          url: t.url,
+          title: t.title,
+          profile: t.browserContextId ? String(t.browserContextId).substring(0, 8) : undefined,
+          lockedBy: lock?.sessionId && lock.sessionId !== sessionId
+            ? lock.sessionId.substring(0, 8) + '…'
+            : undefined,
+        };
+      }),
+      null,
+      2,
+    ));
   }
 
   const lines = hits.map((t) => {
@@ -536,8 +582,8 @@ export function registerTabsTools(
         'Use showAll: true to see ALL browser tabs, not just ones you created this session.',
         '',
         'Operations:',
-        '- list: List all open browser tabs with their IDs, URLs, and titles',
-        '- find: Search tabs by title or URL substring (requires: query)',
+        "- list: List all open browser tabs with their IDs, URLs, and titles (optional: urlFilter — substring filter, format — 'text' default | 'json' for parseable [{id,url,title,profile}])",
+        "- find: Search tabs by title or URL substring (requires: query; optional: format — 'json' for parseable output)",
         '- new: Open a new tab (optional: url — defaults to about:blank, activate — bring to foreground, default: false, profile — create in specific Chrome profile by name/email/directory)',
         '- close: Close a specific tab (requires: tabId)',
         '- activate: Bring a tab to the foreground (requires: tabId)',
@@ -578,6 +624,17 @@ export function registerTabsTools(
             type: 'boolean',
             description:
               'Show all browser tabs, not just session-owned ones (for list action).',
+          },
+          urlFilter: {
+            type: 'string',
+            description:
+              "URL substring filter for the 'list' action (case-insensitive).",
+          },
+          format: {
+            type: 'string',
+            enum: ['text', 'json'],
+            description:
+              "Output format for list/find. 'text' (default) is human-readable; 'json' returns a parseable array [{id, url, title, profile}].",
           },
           sessionId: {
             type: 'string',

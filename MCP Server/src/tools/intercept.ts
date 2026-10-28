@@ -223,7 +223,7 @@ export function registerInterceptTools(
           cleanupStrategy: { type: 'string', enum: ['close', 'detach', 'none'], description: "Tab cleanup on session expiry. 'detach' (default) keeps tabs open, 'close' removes them, 'none' skips cleanup. Sticky per session." },
           exclusive: { type: 'boolean', description: 'Lock tab to this session (default: true). Set false to allow shared access.' },
         },
-        required: ['action', 'tabId'],
+        required: ['action'],
       },
       handler: async (ctx, params) => {
         const action = params.action as string;

@@ -1142,7 +1142,7 @@ const PAGE_INPUT_SCHEMA = {
       description: 'Lock tab to this session (default: true). Set false to allow shared access.',
     },
   },
-  required: ['action', 'tabId'] as const,
+  required: ['action'] as const,
 };
 
 /**

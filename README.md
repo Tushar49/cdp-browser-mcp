@@ -321,8 +321,8 @@ When a connection fails, the server auto-detects the failure mode and prints the
 
 | Action | Description | Required | Optional |
 |--------|-------------|----------|----------|
-| `list` | List all open tabs with IDs, URLs, titles | — | `showAll` |
-| `find` | Search tabs by title or URL substring | `query` | — |
+| `list` | List all open tabs with IDs, URLs, titles (optional `urlFilter` substring; `format:'json'` for parseable output) | — | `showAll`, `urlFilter`, `format` |
+| `find` | Search tabs by title or URL substring | `query` | `format`(`text`\|`json`) |
 | `new` | Open a new tab (background by default) | — | `url`, `activate`, `profile` |
 | `close` | Close a tab | `tabId` | — |
 | `activate` | Bring tab to foreground | `tabId` | — |

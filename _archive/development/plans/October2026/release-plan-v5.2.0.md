@@ -284,7 +284,16 @@ on the demo RP, `dismiss` + `reset_cooldown`, pre-attach-dialog recovery.
    `AGENTS.md:25`, stale "15 full tools" `types.ts:69`, storage 9→11
    `README.md:307`.
 4. **E4 — `wrapError` gains `DomainUnsupportedError` handling** (unlocks
-   `require()` as a first-class tool-time gate).
+   `require()` as a first-class tool-time gate). **DONE 2026-10-27.**
+5. **E5 — tabId auto-resolution (from live agent failures,
+   `_archive/research/UserFeedback/2026-10-27-agent-dx-tabid-and-text-outputs.md`):**
+   schemas drop `tabId` from `required`; `preprocessToolCall` auto-resolves
+   for tab-bound (toolName, action) pairs — one open tab → inject; zero →
+   `Errors.noOpenTabs()`; multiple → `Errors.tabIdRequired()` listing tabs.
+   `tabs` info/close/activate + `webauthn` add_authenticator/reset included;
+   tab-less actions excluded.
+6. **E6 — tabs list/find `format:'json'` + `urlFilter`:** machine-readable
+   tab output (agents were treating the formatted text as an array).
 
 ## WS4 — optional filler (cut unconditionally if WS1/WS2 slip)
 

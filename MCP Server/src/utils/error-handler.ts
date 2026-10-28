@@ -84,6 +84,23 @@ export const Errors = {
     );
   },
 
+  /** No page tabs are open at all (auto-resolve path, 5.2 E5). */
+  noOpenTabs(): ActionableError {
+    return new ActionableError(
+      'No browser tabs are open.',
+      'Open a tab: tabs({ action: "new", url: "https://example.com" }) — or open one in the browser normally and retry.',
+    );
+  },
+
+  /** tabId omitted while multiple tabs are open (auto-resolve path, 5.2 E5). */
+  tabIdRequired(sampleTabId: string, reason: string, tabList: string): ActionableError {
+    return new ActionableError(
+      `${reason}`,
+      `Pass tabId — e.g. tabId: "${sampleTabId}". Open tabs:\n${tabList}`,
+      { openTabs: tabList.split('\n').length },
+    );
+  },
+
   /** Agent session expired due to inactivity. */
   sessionExpired(ttlSeconds: number): ActionableError {
     return new ActionableError(
