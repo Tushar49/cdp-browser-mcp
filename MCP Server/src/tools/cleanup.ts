@@ -31,6 +31,8 @@ async function handleDisconnectTab(
   // Release the tab lock and clean up per-tab state
   ctx.tabOwnership.release(tabId);
   ctx.elementResolvers.delete(tabId);
+  const detachedSess = ctx.tabSessions.get(tabId);
+  if (detachedSess) ctx.findState.delete(detachedSess);
   ctx.tabSessions.detach(tabId, ctx.cdpClient);
   ctx.snapshotCache.invalidate(tabId);
   // Remove from session's tabIds

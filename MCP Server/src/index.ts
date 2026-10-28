@@ -99,6 +99,11 @@ cdpClient.on('disconnected', () => {
   capabilities.clear();
   tabSessionService.clear();
   ctx.webauthnState.clearAll();
+  // Session-scoped find state is unrecoverable after reconnect (new session
+  // ids); modal states are cleared too — CDP does not re-emit an open
+  // dialog's event on re-attach, so kept entries would block tools forever.
+  ctx.findState.clear();
+  ctx.modalStates.clearAll();
   healthMonitor.onDisconnect().catch(() => {
     // Reconnect failed — next tool call will trigger autoConnect
   });
@@ -465,6 +470,9 @@ function wireEventPipeline(serverCtx: ServerContext): void {
         const destroyedTargetId = params.targetId as string | undefined;
         if (destroyedTargetId) {
           serverCtx.webauthnState.clearForTab(destroyedTargetId);
+          serverCtx.modalStates.clearModal(destroyedTargetId);
+          const destroyedSess = serverCtx.tabSessions.get(destroyedTargetId);
+          if (destroyedSess) serverCtx.findState.delete(destroyedSess);
         }
         break;
       }

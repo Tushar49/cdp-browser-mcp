@@ -32,14 +32,21 @@ no tabs launched, authenticator removed + domains disabled afterward:
 | `Performance.enable` (this session) | **OK — contradicts our 5.1.0 "Brave strips Performance" claim** (see WS3-E1) |
 | `Memory.enable`, `Ads.getAdScripts` | absent — upstream `protocol_config.json`, not Brave |
 
-**WS1 (webauthn): GO.** **WS2 (fedcm): CONDITIONAL GO** — enabling works;
-the dialog-flow test on `https://fedcm-demo-rp.dev` (the Chrome-documented
-demo; both glitch demos are 410-dead) runs as the first item of WS2 with
-explicit permission to navigate a tab. **Kill criterion + kill deliverable
-(locked):** if the dialog is unreachable on Brave after `brave://settings`
-attempts → **no `fedcm` tool ships in 5.2 at all**; FedCm moves to the
-v5.3 deferred list (watch-only in `status` remains what it is today); do
-NOT backfill a fake "status reporting" feature to salvage the workstream.
+**WS1 (webauthn): GO — PASSED live 2026-10-28 (see §WS1 verdicts).**
+**WS2 (fedcm): KILLED 2026-10-28 — the live demo-RP test settled it.**
+`FedCm.enable` answers via CDP, but Brave 153 disables the FedCM JS API
+entirely at the browser level (demo page detects: `IdentityCredential`,
+`HTMLIdentityCredentialElement`, `IdentityProvider` all absent from
+window; page reports "Your browser does not support FedCM"). No site can
+show a FedCM dialog on Brave by default → nothing to automate on the
+primary target; the user would have to flip a browser-level setting (if
+one even exists in Brave 153's flags — the flags page did not show one
+readily) and relaunch. Per the locked kill deliverable: **no `fedcm`
+tool ships in 5.2**; FedCm moves to the v5.3 deferred list (watch-only
+in `status` remains what it is today). Do NOT backfill a substitute
+feature. 5.3 re-evaluation note: the domain + dialog automation is
+viable on stock Chrome (research doc §2) — worth testing there before
+deciding.
 
 ## 0.1 Non-negotiable rules (carry forward from 5.1.0)
 
@@ -230,7 +237,10 @@ resident credential exists. Reload-first, or pre-provision with
 `add_credential` and drive the login path. Not a tool bug — protocol-
 level interplay; noted in README + tool description.
 
-## WS2 — `fedcm` tool (conditional on the demo-RP dialog test)
+## WS2 — `fedcm` tool — **KILLED 2026-10-28** (Brave disables the FedCM JS API; §0 verdict)
+
+**Recorded for 5.3** — the design below stays valid for a future cycle
+where the target browser ships FedCM (e.g. stock Chrome).
 
 **First item of this workstream — the dialog-flow spike** (needs navigating
 one tab to `https://fedcm-demo-rp.dev`, seed: complete the IdP login once
@@ -296,25 +306,30 @@ on the demo RP, `dismiss` + `reset_cooldown`, pre-attach-dialog recovery.
 
 ## WS3 — hygiene + corrections (one or two commits, ride along)
 
-1. **E1 — Brave/upstream attribution errata + observe routing — DECISION
-   GATE (momus finding 1): RESOLVED 2026-10-27 — docs-only path.** Retest
-   on the current Brave 153 build (fresh session, console tab):
-   `observe performance` returned full metrics and `observe.memory`
-   returned real counters via `Memory.getDOMCounters`. The 5.1.0
-   "failures" were stale-session artifacts (crashed test tab), not a
-   Brave strip and not an observe routing bug — **no 5.1.1 patch**.
-   Remaining work: docs errata correcting the "Brave strips X" claims,
-   wording conditional on the stock-Chrome A/B result (momus finding 2;
-   `Performance.enable` answered OK on Brave in WS0 while research §0
-   predicted absence — settle the attribution via the A/B before the
-   errata wording ships).
-2. **E2 — 5.1-debt state sweep:** wire `findState`/`modalStates` into
-   `tabs.close` / `cleanup` paths / disconnect handler (§0.2 sites) —
-   the NEW state managers' own cleanup is already inside WS1/WS2.
-3. **E3 — stale count reconciliation:** 14→16 (or **15 if WS2 killed**,
-   momus finding 3) in `index.ts:597,618`, `README.md:41,80,644`,
-   `AGENTS.md:25`, stale "15 full tools" `types.ts:69`, storage 9→11
-   `README.md:307`.
+1. **E1 — Brave/upstream attribution errata — DONE 2026-10-28 (docs-only,
+   no 5.1.1 patch).** Retest on the current Brave 153 build (fresh
+   session): `observe performance` full metrics, `observe.memory` real
+   counters via `Memory.getDOMCounters` — the 5.1.0 "failures" were
+   stale-session artifacts (crashed test tab). Attribution settled by
+   upstream `protocol_config.json` + brave-core (no CDP-stripping
+   patches): Brave inherits Chromium's domain surface. Errata entry
+   shipped in CHANGELOG [Unreleased]; the stock-Chrome A/B remains an
+   optional confirmation, not a wording blocker (upstream sources are
+   decisive).
+2. **E2 — 5.1-debt state sweep — DONE 2026-10-28:** `findState` cleared
+   on tab destroy (`Target.targetDestroyed` via tabSessions reverse
+   lookup), `cleanup` detach, and browser disconnect; `modalStates`
+   cleared on `tabs.close`, `Target.targetDestroyed`, and disconnect
+   (new `ModalStateManager.clearAll()`; CDP does not re-emit an open
+   dialog's event on re-attach, so kept entries would block tools
+   forever). New state managers' own cleanup shipped inside WS1.
+3. **E3 — stale count reconciliation (shrunk: WS1 already bumped
+   14→15 everywhere incl. `AGENTS.md:25`, `index.ts:597,618`,
+   `README.md:41,80,644`, `MCP Server/README.md:4`; WS2 killed → 15 is
+   final; `types.ts:69`'s "15 full tools" is now accidentally correct):**
+   remaining: storage row claims 9 actions (`README.md:307`) while
+   defining 11 (`storage.ts:430`); verify no other stale counts.
+   **DONE 2026-10-28:** README storage row corrected to 11 actions.
 4. **E4 — `wrapError` gains `DomainUnsupportedError` handling** (unlocks
    `require()` as a first-class tool-time gate). **DONE 2026-10-27.**
 5. **E5 — tabId auto-resolution (from live agent failures,
@@ -334,8 +349,9 @@ on the demo RP, `dismiss` + `reset_cooldown`, pre-attach-dialog recovery.
 
 ## Deferred to v5.3 (named in release notes — visible deferral, metis rule)
 
-- **FedCm tool** (conditional — moves here ONLY if the WS2 spike kills it;
-  watch-only in `status` remains what it is today).
+- **FedCm tool** — KILLED for 5.2 (Brave disables the FedCM JS API at the
+  browser level; CDP domain present but nothing can trigger a dialog).
+  Design preserved in WS2 for 5.3; test on stock Chrome there.
 - **Annotated-content structured parsing:** design recorded for 5.3 —
   ~150-line hand-rolled proto wire parser (`utils/proto-wire.ts`,
   no deps) + advisory FIELD_MAP seeded from
@@ -356,16 +372,13 @@ on the demo RP, `dismiss` + `reset_cooldown`, pre-attach-dialog recovery.
 | 2 | WS3-E4 wrapError + gating fix (small, WS1 depends on it) | **done 2026-10-27** | 359 tests green |
 | 3 | WS1 `webauthn` state + tool + cleanup + tests | **done 2026-10-27** | 393 tests green |
 | 4 | WS1 live verification (webauthn.io + scope + override bits) | **done 2026-10-28** | interception round-trip proven; findings fed back into the tool |
-| 5 | WS2 FedCm dialog spike (demo RP; user consent to navigate) | 0.25 | GO/KILL |
-| 6 | WS2 `fedcm` state + tool + tests + live | 1.5 | live (if GO) |
+| 5 | WS2 FedCm dialog spike (demo RP) | **KILLED** | Brave disables the FedCM JS API — no dialog possible |
+| 6 | WS2 `fedcm` state + tool + tests + live | **cut with WS2** | — |
 | 7 | WS3 hygiene commits | 0.5 | live spot-checks |
 | 8 | WS4 intercept promotion (optional) | 0.25 | live |
 | 9 | Release: bump → promote (workflow!) → tag `v5.2.0` | 0.5 | pipeline |
 
-Totals (recomputed per momus finding 6): **≈6.75 sessions all-in**;
-**≈5.0 if WS2 killed** (post-spike, −0.25+1.5); **−0.25 more if WS4 cut**.
-E1's 5.1.1 branch (if triggered) adds ~0.5 and reorders: 5.1.1 cuts
-BEFORE WS1 proceeds. Interim commits after every item (conventional
+Totals: **≈5.0 sessions** (WS2 killed; E4/WS1/live done in-cycle). Interim commits after every item (conventional
 commits, CHANGELOG [Unreleased] accumulates; test baseline counts from
 `pnpm test` at release time — momus finding 8 — the 358 figure is a
 5.1.0 snapshot).

@@ -304,7 +304,7 @@ When a connection fails, the server auto-detects the failure mode and prints the
 | `execute` | 3 | JavaScript evaluation — expressions, async scripts, element-scoped calls |
 | `observe` | 7 | Console messages, network requests, performance metrics, memory counters, downloads, HAR export |
 | `emulate` | 15 | Viewport, color scheme, geolocation, network throttling, timezone, vision deficiency, device posture, CPU performance tier |
-| `storage` | 9 | Cookie CRUD, localStorage/sessionStorage management, storage clearing, quota inspection |
+| `storage` | 11 | Cookie CRUD, localStorage/sessionStorage management, storage clearing, quota inspection, auth-state export/import |
 | `webauthn` | 11 | Passkey testing with virtual authenticators — create/inject credentials, presence + UV simulation, negative-testing override bits |
 | `intercept` | 6 | HTTP request interception — mock, modify, block network requests |
 | `cleanup` | 7 | Session management, disconnect, temp file cleanup, reset |

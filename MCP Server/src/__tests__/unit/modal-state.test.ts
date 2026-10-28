@@ -76,6 +76,16 @@ describe('ModalStateManager', () => {
     });
   });
 
+  describe('clearAll()', () => {
+    it('drops every modal state', () => {
+      modal.setModal('tab1', dialogModal('tab1'));
+      modal.setModal('tab2', fileChooserModal('tab2'));
+      modal.clearAll();
+      expect(modal.getModal('tab1')).toBeUndefined();
+      expect(modal.getModal('tab2')).toBeUndefined();
+    });
+  });
+
   describe('checkBlocked()', () => {
     it('returns null when no modal', () => {
       expect(modal.checkBlocked('tab1', 'page', 'snapshot')).toBeNull();

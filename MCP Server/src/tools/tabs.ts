@@ -422,6 +422,7 @@ async function handleClose(
   await ctx.sendCommand('Target.closeTarget', { targetId: tabId });
 
   // Clean up per-tab state
+  ctx.modalStates.clearModal(tabId);
   ctx.elementResolvers.delete(tabId);
   ctx.tabSessions.detach(tabId, ctx.cdpClient);
   ctx.snapshotCache.invalidate(tabId);
