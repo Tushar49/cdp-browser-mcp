@@ -91,7 +91,7 @@ Always:
 2. Conventional commits: `feat:` `fix:` `refactor:` `docs:` `chore:`.
 3. User-facing change → CHANGELOG.md entry.
 4. New/changed tool → README.md tool listing + agent-friendly description.
-5. Version bumps only via release flow (package.json + `VERSION` in `src/index.ts` together).
+5. Version bumps only via release flow (package.json + `VERSION` in `src/index.ts` together). The release commit must also update every user-facing count: README.md badges at the top (tools/sub-actions — the version badge is npm-driven and self-updates) and the tools table — these were missed for BOTH the 5.1.0 and 5.2.0 releases (badges sat at 5.0.3/14/90+ on main until caught post-release).
 
 Never:
 1. Don't run `_archive/legacy-server-v4.js` (frozen, reference only).
