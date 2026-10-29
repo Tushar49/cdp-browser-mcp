@@ -83,6 +83,20 @@ code:
 Machine-specific absolute paths live only in local tool config, never in
 repo files. Package-manager preference: pnpm / `pnpm dlx` first; npx/npm
 only when pnpm is unavailable.
+
+## Live gates (workflow, not product)
+
+Live verification uses one-shot stdio MCP **client** scripts against a fresh
+`dist/` build (harness tool schemas lag the dist) plus a locally hosted fake
+site — the "rig" — for tests needing a real localhost origin (WebAuthn,
+WebMCP). Rig scripts, client batteries, and capability probes are dev-only:
+they live in research archives on dev, get stripped at promote, and are never
+referenced from main-shipping docs. Gate discipline: one script = one CDP
+connection = one Allow dialog for the user; WebAuthn rigs must be
+assert-only (never `credentials.create` — the user's password manager
+intercepts ceremonies). Find the current rig by searching `_archive/research/`
+for the ws0-spike README on dev.
+
 Competitor/reference checkouts (see `_archive/development/competitors.md`
 for the brief): refreshing them with plain `git pull` is fine; if a
 clone/pull fails on repository ownership, delete the folder and
