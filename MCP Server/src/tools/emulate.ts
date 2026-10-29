@@ -24,6 +24,68 @@ const NETWORK_PRESETS: Record<string, Record<string, unknown>> = {
   none:     { offline: false, latency: 0,      downloadThroughput: -1,      uploadThroughput: -1 },
 };
 
+// WS8 — Network.emulateNetworkConditionsByRule transport (Chrome 152+; live
+// canary WS7 Batch A on Brave 153: ruleIds echo, extraInfo rule echo, []
+// clears, rules survive navigation → reset clears explicitly).
+type NetworkConditionsEntry = Record<string, unknown>;
+
+const NEUTRAL_STATE: Record<string, unknown> = {
+  offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
+};
+const OFFLINE_STATE: Record<string, unknown> = {
+  offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
+};
+
+/** Preset wire shape → ByRule NetworkConditions entry (byte-compat semantics). */
+function presetToConditions(preset: Record<string, unknown>): NetworkConditionsEntry {
+  const entry: NetworkConditionsEntry = {
+    urlPattern: '',
+    latency: preset.latency,
+    downloadThroughput: preset.downloadThroughput,
+    uploadThroughput: preset.uploadThroughput,
+  };
+  if (typeof preset.packetLoss === 'number') entry.packetLoss = preset.packetLoss;
+  return entry;
+}
+
+/** Validate one networkRules entry; returns the CDP shape or the error text. */
+function validateNetworkConditions(raw: unknown): { entry?: NetworkConditionsEntry; error?: string } {
+  if (!raw || typeof raw !== 'object') return { error: 'networkRules entries must be objects' };
+  const r = raw as Record<string, unknown>;
+  const urlPattern = r.urlPattern === undefined || r.urlPattern === null ? '' : r.urlPattern;
+  if (typeof urlPattern !== 'string') return { error: 'urlPattern must be a string' };
+  if (urlPattern !== '' && !/^https?:\/\//i.test(urlPattern)) {
+    return { error: `urlPattern "${urlPattern}" must be an absolute URL pattern (https://…) or empty (match-all)` };
+  }
+  for (const key of ['latency', 'downloadThroughput', 'uploadThroughput'] as const) {
+    const v = r[key];
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      return { error: `${key} must be a finite number` };
+    }
+  }
+  if ((r.latency as number) < 0) return { error: 'latency must be >= 0 (ms)' };
+  // throughput: -1 disables throttling; 0 blocks all transfer — both valid
+  if ((r.downloadThroughput as number) < -1) return { error: 'downloadThroughput must be >= 0 or -1 (disable)' };
+  if ((r.uploadThroughput as number) < -1) return { error: 'uploadThroughput must be >= 0 or -1 (disable)' };
+  const entry: NetworkConditionsEntry = {
+    urlPattern,
+    latency: r.latency,
+    downloadThroughput: r.downloadThroughput,
+    uploadThroughput: r.uploadThroughput,
+  };
+  if (r.packetLoss !== undefined) {
+    const p = r.packetLoss;
+    if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 100) return { error: 'packetLoss must be a number 0-100 (percent)' };
+    entry.packetLoss = p;
+  }
+  return { entry };
+}
+
+/** Branch decided once per session via the cached capability probe. */
+async function byRuleCapable(ctx: ServerContext, sess: string): Promise<boolean> {
+  return ctx.capabilities.has(ctx.cdpClient, 'Network.emulateNetworkConditionsByRule', sess);
+}
+
 // ─── Handler ────────────────────────────────────────────────────────
 
 async function handleEmulate(
@@ -51,6 +113,12 @@ async function handleEmulate(
     try { await ctx.sendCommand('Page.setInputVisualization', { clicks: false }, sess); } catch { /* ok */ }
     try {
       await ctx.sendCommand('Network.enable', {}, sess);
+      // WS8: ByRule rules outlive navigation — clear them explicitly on
+      // capable browsers, then restore the navigator-state override.
+      if (await byRuleCapable(ctx, sess)) {
+        try { await ctx.sendCommand('Network.emulateNetworkConditionsByRule', { matchedNetworkConditions: [] }, sess); } catch { /* ok */ }
+        try { await ctx.sendCommand('Network.overrideNetworkState', NEUTRAL_STATE, sess); } catch { /* ok */ }
+      }
       await ctx.sendCommand('Network.emulateNetworkConditions', NETWORK_PRESETS.none, sess);
       await ctx.sendCommand('Network.setBlockedURLs', { urls: [] }, sess);
       await ctx.sendCommand('Network.setExtraHTTPHeaders', { headers: {} }, sess);
@@ -226,15 +294,69 @@ async function handleEmulate(
     results.push(`Idle state: ${params.idle}`);
   }
 
-  // ── Network condition ──
+  // ── Network condition (WS8: ByRule transport on capable browsers) ──
   if (params.networkCondition) {
     const preset = NETWORK_PRESETS[params.networkCondition as string];
     if (!preset) {
       return fail(`Unknown network condition: ${params.networkCondition}. Use: ${Object.keys(NETWORK_PRESETS).join(', ')}`);
     }
     await ctx.sendCommand('Network.enable', {}, sess);
-    await ctx.sendCommand('Network.emulateNetworkConditions', preset, sess);
+    if (await byRuleCapable(ctx, sess)) {
+      if (params.networkCondition === 'none') {
+        await ctx.sendCommand('Network.emulateNetworkConditionsByRule', { matchedNetworkConditions: [] }, sess);
+      } else {
+        await ctx.sendCommand('Network.emulateNetworkConditionsByRule', {
+          matchedNetworkConditions: [presetToConditions(preset)],
+        }, sess);
+      }
+      // Legacy emulateNetworkConditions affected navigator state; keep that
+      // observable behavior byte-compat (canary A2/A6 evidence).
+      try {
+        await ctx.sendCommand('Network.overrideNetworkState',
+          preset.offline ? OFFLINE_STATE : NEUTRAL_STATE, sess);
+      } catch { /* best-effort navigator-state compat */ }
+    } else {
+      await ctx.sendCommand('Network.emulateNetworkConditions', preset, sess);
+    }
     results.push(`Network: ${params.networkCondition}`);
+  }
+
+  // ── Network rules (WS8 — per-request throttle rules) ──
+  if (params.networkRules !== undefined) {
+    const rawRules = params.networkRules as unknown[];
+    if (!Array.isArray(rawRules) || rawRules.length === 0) {
+      return fail('networkRules must be a non-empty array of rule objects');
+    }
+    const conds: NetworkConditionsEntry[] = [];
+    for (const raw of rawRules) {
+      const v = validateNetworkConditions(raw);
+      if (v.error) return fail(`Invalid networkRules entry: ${v.error}`);
+      conds.push(v.entry!);
+    }
+    await ctx.sendCommand('Network.enable', {}, sess);
+    if (await byRuleCapable(ctx, sess)) {
+      // Precedence (locked in plan): explicit networkRules win over presets
+      await ctx.sendCommand('Network.emulateNetworkConditionsByRule', { matchedNetworkConditions: conds }, sess);
+      results.push(`Network rules: ${conds.length} rule(s), first-match-wins`);
+    } else {
+      return fail('Network.emulateNetworkConditionsByRule is not supported on this browser (requires Chrome 152+). Update Chrome/Brave to use per-request network rules.');
+    }
+  }
+
+  // ── Network state spoof (WS8 — Network.overrideNetworkState) ──
+  if (params.overrideNetworkState !== undefined) {
+    const wantOffline = Boolean(params.overrideNetworkState);
+    await ctx.sendCommand('Network.enable', {}, sess);
+    try {
+      await ctx.sendCommand('Network.overrideNetworkState',
+        wantOffline ? OFFLINE_STATE : NEUTRAL_STATE, sess);
+      results.push(`Network state: ${wantOffline ? 'offline' : 'online'}`);
+    } catch (e) {
+      if (isMethodMissingError(e)) {
+        return fail('Network.overrideNetworkState is not supported on this browser (requires Chrome 152+). Update Chrome/Brave to use network state spoofing.');
+      }
+      throw e;
+    }
   }
 
   // ── Input visualization (5.3 WS4 — Page.setInputVisualization) ──
@@ -301,7 +423,9 @@ export function registerEmulateTools(
         '- idle: Emulate idle/locked screen state (optional: active|locked)',
         '- devicePosture: Foldable device posture override (optional: continuous|folded; Chrome 153+)',
         '- cpuPerformance: CPU performance tier override (optional: low|mid|high|ultra; Chrome 153/154+)',
-        '- networkCondition: Throttle network speed (optional: offline|slow3g|fast3g|slow4g|fast4g|none)',
+        '- networkCondition: Throttle network speed (optional: offline|slow3g|fast3g|slow4g|fast4g|none; uses Network.emulateNetworkConditionsByRule on Chrome 152+, legacy transport otherwise; cleared by reset)',
+        '- networkRules: Per-request throttle rules (optional: array of {urlPattern? (empty=all, absolute https URLPattern otherwise), latency, downloadThroughput, uploadThroughput, packetLoss?}; first-match wins; Chrome 152+; cleared by reset)',
+        '- overrideNetworkState: Spoof navigator.onLine/connection (optional: boolean; true=offline, false=online; Network.overrideNetworkState, Chrome 152+; cleared by reset)',
         '- inputVisualization: Show click markers on the page (optional: boolean; Page.setInputVisualization, Chrome 153+; cleared by reset)',
         '- ignoreSSL: Bypass SSL certificate errors (optional: boolean)',
         '- blockUrls: Block requests matching URL patterns (optional: string array)',
@@ -342,7 +466,23 @@ export function registerEmulateTools(
           idle: { type: 'string', enum: ['active', 'locked'], description: 'Idle state.' },
           devicePosture: { type: 'string', enum: ['continuous', 'folded'], description: 'Device posture override (Chrome 153+).' },
           cpuPerformance: { type: 'string', enum: ['low', 'mid', 'high', 'ultra'], description: 'CPU performance tier override (Chrome 153/154+).' },
-          networkCondition: { type: 'string', enum: ['offline', 'slow3g', 'fast3g', 'slow4g', 'fast4g', 'none'], description: 'Network throttle preset.' },
+          networkCondition: { type: 'string', enum: ['offline', 'slow3g', 'fast3g', 'slow4g', 'fast4g', 'none'], description: 'Network throttle preset (ByRule transport on Chrome 152+, legacy otherwise; cleared by reset).' },
+          networkRules: {
+            type: 'array',
+            description: 'Per-request network conditions rules (CDP Network.emulateNetworkConditionsByRule; Chrome 152+; first-match wins; empty urlPattern = all requests; cleared by reset).',
+            items: {
+              type: 'object',
+              properties: {
+                urlPattern: { type: 'string', description: "Absolute URLPattern ('https://…') or empty string for match-all." },
+                latency: { type: 'number', description: 'Minimum latency in ms.' },
+                downloadThroughput: { type: 'number', description: 'Max aggregated download bytes/sec (-1 disables).' },
+                uploadThroughput: { type: 'number', description: 'Max aggregated upload bytes/sec (-1 disables).' },
+                packetLoss: { type: 'number', description: 'WebRTC packet loss percent 0-100 (optional).' },
+              },
+              required: ['latency', 'downloadThroughput', 'uploadThroughput'],
+            },
+          },
+          overrideNetworkState: { type: 'boolean', description: 'Spoof navigator.onLine/connection state (true=offline, false=online; Chrome 152+; cleared by reset).' },
           inputVisualization: { type: 'boolean', description: 'Show click markers on the page (Page.setInputVisualization; cleared by reset).' },
           ignoreSSL: { type: 'boolean', description: 'Ignore SSL certificate errors.' },
           blockUrls: { type: 'array', items: { type: 'string' }, description: 'URLs to block.' },

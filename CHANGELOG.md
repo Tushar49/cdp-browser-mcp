@@ -2,6 +2,17 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
+## [5.3.5] - 2026-10-30
+
+### Added
+- **emulate `networkRules`** — per-request network throttle rules via CDP `Network.emulateNetworkConditionsByRule` (Chrome 152+; first-match wins; empty `urlPattern` = all requests; `packetLoss` supported; validation with actionable errors; cleared by `emulate reset`).
+- **emulate `overrideNetworkState`** — spoof `navigator.onLine`/connection state (`Network.overrideNetworkState`, Chrome 152+; `true`=offline, `false`=online; cleared by `reset`).
+- **emulate network presets now ride the ByRule transport** on Chrome 152+ browsers — `networkCondition` preset names, semantics and output lines unchanged; silent legacy `Network.emulateNetworkConditions` fallback on older builds (`isMethodMissingError` branch, decided once per session via the cached capability probe). Live-caught semantics carried over: ByRule rules SURVIVE navigation → `reset` clears rules explicitly before the legacy pass; preset `offline` keeps restoring the navigator behavior the legacy transport had (via `overrideNetworkState`).
+- **CHIPS partitionKey in storage (WS9)** — `set_cookie`/`delete_cookies` accept `partitionKey` (origin string = Playwright `sourceOrigin` shorthand normalized to `{topLevelSite, hasCrossSiteAncestor:false}`; or the full CDP object) and imported state cookies carry their key on re-import; `get_cookies` lines append `| partitioned: <topLevelSite>` when a cookie is partitioned; `export_state` passes the raw CDP partitionKey object through untouched (inside the existing no-scrub exemption, by design). Partitioned sets are auto-`Secure` (CDP rejects without it — canary-proven). Brave caveat: the shield silently drops page-JS third-party cookie writes — partitioned cookies are verifiable via the CDP/protocol path only.
+
+### Fixed
+- **`webauthn list_credentials` output was being scrubbed to `***`** — the 5.3 WS1 secrets scrubber's `PLAIN_PAIR` masked `credentialId: …` (its `SECRET_KEY` fragment list matches "credential"), defeating `fullIds`' documented purpose (untruncated ids must be copyable into `remove_credential`/`set_credential_properties`). A virtual-authenticator credential ID is an identifier scoped to the session's own authenticator, not a secret: `list_credentials` opts its result out via the `_noScrub` mechanism (the `export_state` precedent); the listing never carries key material. Caught live at the 5.3.5 WS4 battery rerun on Brave 153.
+
 ## [5.3.0] - 2026-10-29
 
 ### Added

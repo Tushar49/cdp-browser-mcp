@@ -303,8 +303,8 @@ When a connection fails, the server auto-detects the failure mode and prints the
 | `form` | 3 | Smart form filling engine — fill, read, clear; handles text, combobox, checkbox, radio, select, date in one call |
 | `execute` | 3 | JavaScript evaluation — expressions, async scripts, element-scoped calls |
 | `observe` | 7 | Console messages, network requests, performance metrics, memory counters, downloads, HAR export |
-| `emulate` | 16 | Viewport, color scheme, geolocation, network throttling, timezone, vision deficiency, device posture, CPU performance tier, click-marker visualization |
-| `storage` | 11 | Cookie CRUD, localStorage/sessionStorage management, storage clearing, quota inspection, auth-state export/import |
+| `emulate` | 18 | Viewport, color scheme, geolocation, network throttling (presets ride per-request ByRule rules on Chrome 152+), per-request `networkRules`, timezone, locale, vision deficiency, device posture, CPU performance tier, click-marker visualization, navigator network-state spoof |
+| `storage` | 11 | Cookie CRUD (incl. CHIPS `partitionKey` set/delete + `| partitioned:` display in listings), localStorage/sessionStorage management, storage clearing, quota inspection, auth-state export/import (partitionKey round-trips) |
 | `webauthn` | 12 | Passkey testing with virtual authenticators — create/inject credentials, credential-property mutation, presence + UV simulation, negative-testing override bits |
 | `intercept` | 6 | HTTP request interception — mock, modify, block network requests |
 | `cleanup` | 7 | Session management, disconnect, temp file cleanup, reset |
@@ -425,7 +425,9 @@ Set any combination of properties in a single call:
 | `timezone` | Timezone override | e.g. `America/New_York` |
 | `locale` | Locale override | e.g. `fr-FR` |
 | `visionDeficiency` | Vision simulation | `protanopia`, `deuteranopia`, `tritanopia`, `achromatopsia`, `blurredVision` |
-| `networkCondition` | Network throttle | `offline`, `slow3g`, `fast3g`, `slow4g`, `fast4g`, `none` |
+| `networkCondition` | Network throttle (rides `Network.emulateNetworkConditionsByRule` on Chrome 152+, legacy transport otherwise) | `offline`, `slow3g`, `fast3g`, `slow4g`, `fast4g`, `none` |
+| `networkRules` | Per-request throttle rules (first-match wins; empty `urlPattern` = all requests; `packetLoss` 0–100; Chrome 152+; cleared by `reset`) | array of `{urlPattern?, latency, downloadThroughput, uploadThroughput, packetLoss?}` |
+| `overrideNetworkState` | Spoof `navigator.onLine`/connection (Chrome 152+; cleared by `reset`) | boolean (`true`=offline, `false`=online) |
 | `ignoreSSL` | Bypass SSL errors | boolean |
 | `blockUrls` | Block URL patterns | string array |
 | `extraHeaders` | Set custom headers | object |
@@ -440,9 +442,9 @@ Set any combination of properties in a single call:
 
 | Action | Description | Required | Optional |
 |--------|-------------|----------|----------|
-| `get_cookies` | Retrieve cookies | `tabId` | `urls` |
-| `set_cookie` | Set a cookie | `tabId`, `name`, `value` | `domain`, `path`, `secure`, `httpOnly`, `sameSite`, `expires` |
-| `delete_cookies` | Delete cookies by name | `tabId`, `name` | `url`, `domain`, `path` |
+| `get_cookies` | Retrieve cookies (partitioned cookies show `| partitioned: <topLevelSite>`) | `tabId` | `urls` |
+| `set_cookie` | Set a cookie (CHIPS: `partitionKey` = origin string shorthand or full CDP key; partitioned sets auto-`Secure`) | `tabId`, `name`, `value` | `domain`, `path`, `secure`, `httpOnly`, `sameSite`, `expires`, `partitionKey` |
+| `delete_cookies` | Delete cookies by name (optional partition-scoped delete) | `tabId`, `name` | `url`, `domain`, `path`, `partitionKey` |
 | `clear_cookies` | Clear all cookies | `tabId` | — |
 | `clear_data` | Clear storage by type | `tabId` | `origin`, `types` |
 | `quota` | Check storage quota | `tabId` | — |

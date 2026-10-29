@@ -183,6 +183,19 @@ describe('webauthn tool (WS1)', () => {
       const r = await list(ctx, { authenticatorId: 'auth-1' });
       expect(textOf(r)).toContain('holds 0 credential');
     });
+
+    it('fullIds result opts out of the scrubber (5.3.5 fix — credentialId is an identifier, not a secret; 5.4 canary-caught at the battery rerun)', async () => {
+      const { ctx, webauthnState } = makeCtx((_method, params) => {
+        if (_method === 'WebAuthn.enable') return {};
+        if (_method === 'WebAuthn.getCredentials')
+          return { credentials: [{ credentialId: 'c' + '9'.repeat(60), rpId: 'example.com', isResidentCredential: true, signCount: 4 }] };
+        return {};
+      });
+      webauthnState.register('auth-1', { ownerTabId: 't1', options: {}, createdAt: 0 });
+      const r = await handleListCredentials(ctx, { authenticatorId: 'auth-1', fullIds: true });
+      expect(textOf(r)).toContain('c' + '9'.repeat(60)); // UNMASKED — full id printed
+      expect((r as Record<string, unknown>)._noScrub).toBe(true);
+    });
   });
 
   describe('set_user_verified / set_override_bits', () => {

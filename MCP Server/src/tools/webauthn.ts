@@ -292,7 +292,15 @@ export async function handleListCredentials(ctx: ServerContext, p: Record<string
   const activity = ctx.webauthnState.credentialActivity(authenticatorId);
   const fullIds = p.fullIds === true;
   const formatted = creds.map((c) => formatCredential(c, activity?.get(String(c.credentialId)), fullIds)).join('\n');
-  return ok(`Authenticator ${authenticatorId.slice(0, 12)}… holds ${creds.length} credential(s):\n${formatted}`);
+  const result = ok(`Authenticator ${authenticatorId.slice(0, 12)}… holds ${creds.length} credential(s):\n${formatted}`);
+  // 5.3.5 §WS4-rerun fix (canary-caught, live at the battery rerun): the WS1
+  // scrubber's PLAIN_PAIR masks `credentialId: …` (SECRET_KEY matches
+  // "credential") — defeating fullIds' documented purpose (untruncated ids
+  // must be copyable into remove_credential / set_credential_properties).
+  // A virtual-authenticator credential ID is an identifier scoped to the
+  // session's own authenticator, not a secret. Scoped opt-out, export_state
+  // precedent (the listing carries ids/rpId/counters — never key material).
+  return { ...result, _noScrub: true };
 }
 
 export async function handleRemoveCredential(ctx: ServerContext, p: Record<string, unknown>): Promise<ToolResult> {
