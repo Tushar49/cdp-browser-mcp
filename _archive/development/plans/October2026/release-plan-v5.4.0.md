@@ -152,23 +152,28 @@ IDENTICAL partitionKey (object-equality assertion in gate script).
 
 ### Chores (folded into the 5.3.5 release rows)
 
-- **WS4 battery rerun, Bitwarden-free profile** (momus T1-5; carries the
-  5.3 open item): precondition — profile without Bitwarden (the
-  maintainer creates it; we never launch browsers). One dedicated
-  connection; battery = `_archive/research/October2026/ws0-spike/
-  live-ws4-cdp.mjs` + `webauthn-rig.html` via fresh dist; expected
-  re-assertions: genuine→VALID, `isBogusSignature`→INVALID,
-  restore→VALID. Pre-declared consequence on PASS: the webauthn.tool
-  Bitwarden CAVEAT narrows (text-only change — explicitly allowed in
-  5.3.5; "no contract changes" is not "no doc changes"). On
-  situation-repeat, the CAVEAT sharpening text re-declares PASS as the
-  alternative-verified path (inputVisualization rule).
+- **WS4 battery rerun on the maintainer's CDP-enabled Brave** (momus
+  T1-5; carries the 5.3 open item): precondition — none new; the
+  running Brave instance stays as-is (never-relaunch law; no new
+  profile). One dedicated connection; battery =
+  `_archive/research/October2026/ws0-spike/live-ws4-cdp.mjs` +
+  `webauthn-rig.html` via fresh dist; expected re-assertions:
+  genuine→VALID, `isBogusSignature`→INVALID, restore→VALID at the CDP
+  level; page-level `credentials.create` path may stay Bitwarden-routed
+  (`webAuthenticationProxy`, the maintainer's standing choice). On any
+  BLOCKED outcome the close-out re-declares PASS as the
+  alternative-verified path and sharpens the CAVEAT text
+  (inputVisualization rule). If the maintainer happens to disable
+  Bitwarden for the gate window, full page-level validation happens —
+  their call, at gate time.
 - **npm name-collision decision** — DEADLINE: before the 5.3.5 tag
-  (packaging metadata attaches to the tag). Decision record slot below;
-  recommendation: KEEP `cdp-mcp-server` (rename touches package.json,
-  README/npm sections, install docs, local config comments for low
-  expected benefit; the collision is a different product occupying the
-  sibling name `cdp-browser-mcp` only).
+  (packaging metadata attaches to the tag). **Decision (2026-10-29,
+  maintainer): KEEP `cdp-mcp-server`.** Arms considered: rename to the
+  natural sibling `cdp-browser-mcp` — impossible, occupied by an
+  unrelated product; rename to any other name — breaks install lines,
+  docs, repo-config comments for marginal gain on an established
+  7-version package. No work item; the 5.3-era name-collision note in
+  competitors.md is closed.
 - **5.3.5 count sweep (verification mode)** (momus T1-1/T1-4d): confirm
   NO counts moved: README badges `15 tools / 130+`, tools table,
   `index.ts` instruction-string "15 tools" + its action listing,
@@ -288,10 +293,11 @@ deviation only); ByRule behavioral delta accepted with auto-fallback +
 KILL path; new tool avoided (observe homes); `getStorageItems` KILLED
 for both halves (oracle) — twice-survived stretch logic; superseded by
 5.3's `list_credentials` + lifecycle events; re-validate only on a
-concrete ask. **Open maintainer inputs:** (1) npm name-keep vs rename
-(recommendation keep) — answerable any time before the 5.3.5 tag;
-(2) veto rights on the getStorageItems kill; (3) who builds the
-Bitwarden-free profile (maintainer, one-time).
+concrete ask. **Open maintainer inputs (resolved 2026-10-29):** (1) npm
+name — KEPT `cdp-mcp-server`; (2) getStorageItems kill — accepted;
+(3) WS4 rerun profile — the maintainer's running CDP Brave, no new
+profile; optional Bitwarden-disable at gate time is the maintainer's
+call.
 
 ## Test matrix / verification matrix (momus T3-13)
 
