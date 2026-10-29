@@ -166,6 +166,44 @@ written before its batch's outcome is recorded in this file.**
 
 ## 5.3.5 — "controls" half (≈1.25–2.0 sessions)
 
+**CLOSE-OUT (2026-10-30): SHIPPED as v5.3.5.** npm + GitHub Release published,
+Guard+CI green at tag. Lines below record the per-row results:
+- **WS8 — DONE** (`7842537`): code + 16 unit tests (baseline 479 → 495) +
+  live gate **9/9 PASS** (live-ws8.mjs: baseline 7ms → slow3g 2039ms →
+  networkRules precedence 316ms → navigator offline spoof → reset
+  un-throttles + restores onLine). `mockCamera` was already KILL by WS7 —
+  the trim-order rider never existed to cut.
+- **WS9 — DONE** (`16dde09`): code + 8 unit tests (495 → 503) + live gate
+  **8/8 PASS** (live-ws9.mjs: shorthand set → `| partitioned:` shown →
+  export passthrough → clear → import → **object-equality round-trip** →
+  partition-scoped delete; a bonus cross-check: the WS7-era `ws7_v1`
+  cookie still round-tripped identically). Harness smoke on the 5.3.5
+  dist: same story (second-source cross-check COMPLETE: live tools/list
+  + unit registry agree — schema carries networkRules/overrideNetworkState/
+  partitionKey).
+- **WS4 battery rerun — DONE — GATE PASS 7/7** on the maintainer's
+  running CDP Brave (no profile change; Bitwarden stands). 6/7 by the
+  letter, then the 7th surfaced a REAL product bug, not a rig problem:
+  the WS1 scrubber's PLAIN_PAIR masked `credentialId: …` to `***`
+  (SECRET_KEY matches "credential"), defeating fullIds' contract. Fixed
+  forward with the scoped `_noScrub` opt-out on list_credentials
+  (export_state precedent; listings carry identifiers, never key
+  material); unit test pins the unmasked full id; rerun → **PASS**.
+  The page-level create-path assertion stays Bitwarden-routed (standing
+  caveat per WS4 rule — the re-declared PASS basis for the CDP path is
+  the alternative-verified route). Bitwarden was never disabled.
+- **npm decision — DONE** (kept `cdp-mcp-server`, recorded above).
+- **5.3.5 count sweep (verification mode) — DONE** at the release commit
+  (`f722c8b`): tools **15 unchanged**; badge **130+ unchanged**;
+  README tools table — emulate 16→18 (networkRules + overrideNetworkState
+  property rows), storage 11 with CHIPS notes; instruction string
+  unchanged (no new tool names); both README files touched; second
+  source (live tools/list of the 5.3.5 dist) agrees.
+- **Self-audit (T2-10):** planned ≈1.25–2.0 sessions; actual — canaries
+  3 batch-scripts + 5.3.5 feature rows + rerun + release ≈ 2.0 sessions
+  (within plan; the +0.25–0.5 live-fix buffer ABSORBED the scrubber
+  bug — it worked).
+
 ### WS8 — emulate: ByRule migration + emulation riders (0.5–1)
 
 Homes (locked pre-release, momus T1-16): all in `emulate`.
