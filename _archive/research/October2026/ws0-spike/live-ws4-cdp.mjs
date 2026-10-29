@@ -1,12 +1,16 @@
 // WS4 CDP-only gate — SINGLE consolidated run (one Allow dialog, no page, no
 // WebAuthn ceremony, no passkey creation — everything is CDP against a
 // virtual authenticator).
-import { fileURLToPath } from 'url';
+// (2026-10-29 rerun copy: file-url imports — archive dir has no bare
+// specifier resolution; dist path absolute.)
+// (2026-10-29 rerun copy: file-url imports — archive dir has no bare
+// specifier resolution; dist path absolute.)
 import { randomBytes, generateKeyPairSync } from 'crypto';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+const sdk = 'file:///' + 'A:/Projects/Browser/mcp-servers/cdp-browser-mcp/MCP Server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/'.replace(/ /g, '%20');
+const { Client } = await import(sdk + 'index.js');
+const { StdioClientTransport } = await import(sdk + 'stdio.js');
 
-const distPath = fileURLToPath(new URL('./dist/index.js', import.meta.url));
+const distPath = 'A:/Projects/Browser/mcp-servers/cdp-browser-mcp/MCP Server/dist/index.js';
 const transport = new StdioClientTransport({ command: process.execPath, args: [distPath] });
 const client = new Client({ name: 'live-ws4-cdp', version: '0.0.1' });
 await client.connect(transport);
@@ -55,7 +59,7 @@ const credIdStd = (() => {
   while (std.length % 4) std += '=';
   return std;
 })();
-check('fullIds prints untruncated id', list.includes(credIdStd), credIdStd.slice(0, 20) + '…');
+check('fullIds prints untruncated id', list.includes(credIdStd), 'searched=' + credIdStd.slice(0, 20) + '… got=' + list.split('\n').filter((l) => l.includes('credentialId')).join(' | '));
 
 const removed = textOf(await call('webauthn', {
   action: 'set_credential_properties', authenticatorId: authId, credentialId: credIdB64u, signCount: -1,
