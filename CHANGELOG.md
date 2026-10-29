@@ -2,7 +2,7 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
-## [Unreleased]
+## [5.3.0] - 2026-10-29
 
 ### Added
 - **extension listing + opt-in toolbar trigger (5.3 WS6)** — `browser` gains `extensions` (UNPACKED extensions only, per protocol: id/name/version/path/enabled; an empty list on a stock profile is the expected outcome, not an error) and `trigger_extension` — the programmatic equivalent of a user clicking the extension icon (`Extensions.triggerAction`; requires exact id + tabId). **Guardrails (metis-mandatory):** trigger is OPT-IN via `CDP_EXTENSION_TRIGGER_ALLOWLIST` (comma-separated exact IDs; default: fails with a "not allow-listed" remedy naming the env var — listing always works); the id is never inferred (no wildcard/first-listed/iterate); results are labeled UNTRUSTED. Live-caught Chromium semantics: triggerAction **refuses page-type targets** ("Action can only be triggered on a tab target") — the handler resolves the tab-type target (hidden by default `Target.getTargets` filters) via parentId or a unique URL match, polls briefly for freshly navigated tabs, and the filter's catch-all rule keeping page-type twins in the result is excluded (unit-locked). Live-verified on Brave 153 with a user-loaded test unpacked extension: listing, guardrail block, trigger fired.
