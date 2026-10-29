@@ -92,7 +92,7 @@ All three batches: one script each, archived per gate discipline at
 close-out. Sequencing constraint (hard): **no WS8/WS9/WS10/WS11 code is
 written before its batch's outcome is recorded in this file.**
 
-## 5.3.5 — "controls" half (≈1.5–2.25 sessions)
+## 5.3.5 — "controls" half (≈1.25–2.0 sessions)
 
 ### WS8 — emulate: ByRule migration + emulation riders (0.5–1)
 
@@ -175,11 +175,14 @@ IDENTICAL partitionKey (object-equality assertion in gate script).
   7-version package. No work item; the 5.3-era name-collision note in
   competitors.md is closed.
 - **5.3.5 count sweep (verification mode)** (momus T1-1/T1-4d): confirm
-  NO counts moved: README badges `15 tools / 130+`, tools table,
+  NO counts moved: badges + tools table in BOTH README.md files (root +
+  `MCP Server/README.md` — the miss shape of both failed releases),
   `index.ts` instruction-string "15 tools" + its action listing,
   `types.ts` roster line, AGENTS.md Structure line. One tool (emulate)
   row changes shape (+1 action only if `overrideNetworkState` lands) —
-  re-derive action total from registry.ts wiring and cross-check twice.
+  re-derive action total from `registry.ts` wiring and cross-check
+  against a SECOND source (live `tools/list` output or a
+  dispatch-allowlist test).
 - Release mechanics: bump `package.json` + `VERSION` const together →
   `[5.3.5]` CHANGELOG (Added for WS8/WS9 features, Changed for the
   get_cookies line + CAVEAT text, Fixed for any in-cycle fixes) →
@@ -188,7 +191,7 @@ IDENTICAL partitionKey (object-equality assertion in gate script).
 Trim order 5.3.5 (pre-declared): `overrideNetworkState` → `mockCamera` →
 hold (ByRule migration, CHIPS, sweep, chores never trim).
 
-## 5.4.0 — "observability" half (≈2.75–3.5 sessions)
+## 5.4.0 — "observability" half (≈2.75–3.25 sessions)
 
 ### WS10 — perf insights flagship (1–1.5)
 
@@ -255,11 +258,13 @@ proven it; any in-cycle fixes; slim-mode schema budget re-check
   README top badges (tool count likely STAYS 15 — verify `observe` did
   not grow a tool; sub-action count moves: ≥ +4 → recompute), README
   tools table + observe/emulate rows + per-action descriptions (rule 4),
-  `index.ts` instruction string (~:645 — recompute the action listing
+  `index.ts` instruction string (:689 area — recompute the action listing
   even though the tool list is unchanged),
   `types.ts` roster line, AGENTS.md Structure line. Counts derived from
-  `registry.ts` wiring, cross-checked twice, recorded in the release
-  commit body.
+  `registry.ts` wiring, cross-checked against a SECOND source (the live
+  `tools/list` output or a dispatch-allowlist test) and recorded in the
+  release commit body. Sweep surface names BOTH README.md files (root +
+  `MCP Server/README.md` — the miss shape of both failed releases).
 - Release mechanics identical to 5.3.5's row with `[5.4.0]` CHANGELOG
   (Added: perf actions, heap actions; Changed: emulate rows if
   5.3.5-pending notes).
@@ -280,7 +285,8 @@ hold (flagship + heap core + sweep never trim; WS12 is the buffer).
 | 7 | WS12 slack/catch-up | 0.25 | live param works | 5.4.0 |
 | 8 | 5.4.0 sweep + release | 0.5 | sweep table empty, pipeline green | 5.4.0 |
 
-Self-audit + buffer (momus T2-10): table total ≈ 4.25–5.25 sessions.
+Self-audit + buffer (momus T2-10): table total ≈ 4.0–5.25 sessions
+(per-half headers sum to their own rows: 1.25–2.0 + 2.75–3.25).
 Entering test baseline **479 green**; expected deltas ≈ +16 (5.3.5) and
 +14 (5.4.0) → ≈ 509; plus 0.25–0.5 live-fix buffer (4 in-cycle fixes in
 5.2, webmcp round-trip shape in 5.3). Self-audit line required at
@@ -309,7 +315,7 @@ call.
 | CHIPS | partitioned cookie survives export→import identically | +6 normalize/passthrough/round-trip |
 | perf insights | rig under slow3g → 3 insight classes | +8 fixtures |
 | heap dump/summary | dump rig → offline ground-truth count matches | +6 synthetic fixture + streaming |
-| WS4 rerun | 3 re-assertions on Bitwarden-free profile | existing 5.3 battery unchanged |
+| WS4 rerun | 3 re-assertions on the maintainer's running CDP Brave (Bitwarden stands; caveat re-declaration rule) | existing 5.3 battery unchanged |
 | Regression | flag+toggle connect unchanged; slim mode unaffected; baseline+ΣN green | existing suite |
 
 Risks → absorbing gate (momus T3-15): ByRule misbehaves → WS7 Batch A
