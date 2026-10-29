@@ -2,6 +2,13 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
+## [Unreleased] — accumulates for 5.3.5 (first feature half of the 5.4 cycle)
+
+### Added
+- **emulate `networkRules`** — per-request network throttle rules via CDP `Network.emulateNetworkConditionsByRule` (Chrome 152+; first-match wins; empty `urlPattern` = all requests; `packetLoss` supported; validation with actionable errors; cleared by `emulate reset`).
+- **emulate `overrideNetworkState`** — spoof `navigator.onLine`/connection state (`Network.overrideNetworkState`, Chrome 152+; `true`=offline, `false`=online; cleared by `reset`).
+- **emulate network presets now ride the ByRule transport** on Chrome 152+ browsers — `networkCondition` preset names, semantics and output lines unchanged; silent legacy `Network.emulateNetworkConditions` fallback on older builds (`isMethodMissingError` branch, decided once per session via the cached capability probe). Live-caught semantics carried over: ByRule rules SURVIVE navigation → `reset` clears rules explicitly before the legacy pass; preset `offline` keeps restoring the navigator behavior the legacy transport had (via `overrideNetworkState`).
+
 ## [5.3.0] - 2026-10-29
 
 ### Added
