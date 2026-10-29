@@ -8,8 +8,7 @@
 
 import type { ToolDefinition, ToolResult, ServerContext } from '../types.js';
 
-export class ToolRegistry {
-  private tools = new Map<string, ToolDefinition>();
+export class ToolRegistry {  private tools = new Map<string, ToolDefinition>();
 
   /** Register a tool definition. Throws if a duplicate name is registered. */
   register(tool: ToolDefinition): void {
@@ -20,11 +19,17 @@ export class ToolRegistry {
   }
 
   /** List all registered tools in MCP ListTools response format. */
-  list(): Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> {
+  list(): Array<{
+    name: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+    annotations?: ToolDefinition['annotations'];
+  }> {
     return Array.from(this.tools.values()).map(t => ({
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
+      ...(t.annotations ? { annotations: t.annotations } : {}),
     }));
   }
 
@@ -43,7 +48,8 @@ export class ToolRegistry {
   ): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {
-      return {
+      const { scrubToolResult } = await import('../utils/scrub.js');
+      return scrubToolResult({
         content: [
           {
             type: 'text',
@@ -51,14 +57,20 @@ export class ToolRegistry {
           },
         ],
         isError: true,
-      };
+      });
     }
 
     try {
-      return await tool.handler(ctx, args);
+      const result = await tool.handler(ctx, args);
+      // 5.3 WS1 O2: the ONE universal scrub choke point — every result path
+      // (ok()/fail()/success()/raw literals) returns through here.
+      const { scrubToolResult } = await import('../utils/scrub.js');
+      return scrubToolResult(result);
     } catch (error: unknown) {
       const { wrapError } = await import('../utils/error-handler.js');
-      return wrapError(error).toToolResult();
+      const wrapped = wrapError(error).toToolResult();
+      const { scrubToolResult } = await import('../utils/scrub.js');
+      return scrubToolResult(wrapped);
     }
   }
 

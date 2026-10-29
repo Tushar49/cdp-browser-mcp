@@ -48,6 +48,7 @@ async function handleEmulate(
     try { await ctx.sendCommand('Emulation.setCPUPerformanceOverride', { performanceTier: 'unknown' }, sess); } catch { /* ok */ }
     try { await ctx.sendCommand('Emulation.setUserAgentOverride', { userAgent: '' }, sess); } catch { /* ok */ }
     try { await ctx.sendCommand('Emulation.setAutoDarkModeOverride', {}, sess); } catch { /* ok */ }
+    try { await ctx.sendCommand('Page.setInputVisualization', { clicks: false }, sess); } catch { /* ok */ }
     try {
       await ctx.sendCommand('Network.enable', {}, sess);
       await ctx.sendCommand('Network.emulateNetworkConditions', NETWORK_PRESETS.none, sess);
@@ -236,6 +237,20 @@ async function handleEmulate(
     results.push(`Network: ${params.networkCondition}`);
   }
 
+  // ── Input visualization (5.3 WS4 — Page.setInputVisualization) ──
+  if (params.inputVisualization !== undefined) {
+    try { await ctx.sendCommand('Page.enable', {}, sess); } catch { /* ok */ }
+    try {
+      await ctx.sendCommand('Page.setInputVisualization', { clicks: Boolean(params.inputVisualization) }, sess);
+      results.push(`Input visualization: ${params.inputVisualization ? 'on (click markers)' : 'off'}`);
+    } catch (e) {
+      if (isMethodMissingError(e)) {
+        return fail('Page.setInputVisualization is unsupported on this browser (needs Chrome 153+; Brave: chrome://flags #devtools-webmcp-support).');
+      }
+      throw e;
+    }
+  }
+
   // ── Ignore SSL ──
   if (params.ignoreSSL !== undefined) {
     await ctx.sendCommand('Security.enable', {}, sess);
@@ -287,6 +302,7 @@ export function registerEmulateTools(
         '- devicePosture: Foldable device posture override (optional: continuous|folded; Chrome 153+)',
         '- cpuPerformance: CPU performance tier override (optional: low|mid|high|ultra; Chrome 153/154+)',
         '- networkCondition: Throttle network speed (optional: offline|slow3g|fast3g|slow4g|fast4g|none)',
+        '- inputVisualization: Show click markers on the page (optional: boolean; Page.setInputVisualization, Chrome 153+; cleared by reset)',
         '- ignoreSSL: Bypass SSL certificate errors (optional: boolean)',
         '- blockUrls: Block requests matching URL patterns (optional: string array)',
         '- extraHeaders: Set extra HTTP headers on all requests (optional: object)',
@@ -327,6 +343,7 @@ export function registerEmulateTools(
           devicePosture: { type: 'string', enum: ['continuous', 'folded'], description: 'Device posture override (Chrome 153+).' },
           cpuPerformance: { type: 'string', enum: ['low', 'mid', 'high', 'ultra'], description: 'CPU performance tier override (Chrome 153/154+).' },
           networkCondition: { type: 'string', enum: ['offline', 'slow3g', 'fast3g', 'slow4g', 'fast4g', 'none'], description: 'Network throttle preset.' },
+          inputVisualization: { type: 'boolean', description: 'Show click markers on the page (Page.setInputVisualization; cleared by reset).' },
           ignoreSSL: { type: 'boolean', description: 'Ignore SSL certificate errors.' },
           blockUrls: { type: 'array', items: { type: 'string' }, description: 'URLs to block.' },
           extraHeaders: { type: 'object', description: 'Extra HTTP headers.' },

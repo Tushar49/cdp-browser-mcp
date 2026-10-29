@@ -69,6 +69,21 @@ export interface ServerConfig {
 
   /** If true, expose 6 slim tools instead of 15 full tools (for small-context models) */
   slimMode: boolean;
+
+  /**
+   * Opt-in origin allow-list (CDP_ALLOWED_ORIGINS, comma-separated). When
+   * non-empty, tab-bound tool calls may only target tabs whose origin is in
+   * the list; everything else fails with an actionable error. Empty (default)
+   * = unrestricted — today's behavior.
+   */
+  allowedOrigins: string[];
+
+  /**
+   * Opt-in allow-list for extension toolbar-button triggers (5.3 WS6) —
+   * exact extension IDs from CDP_EXTENSION_TRIGGER_ALLOWLIST. Empty by
+   * default: trigger fails with a remedy, listing always works.
+   */
+  extensionTriggerAllowlist: string[];
 }
 
 // ─── MCP Tool Result ────────────────────────────────────────────────
@@ -177,6 +192,37 @@ export interface ToolDefinition {
   description: string;
   inputSchema: Record<string, unknown>;
   handler: ToolHandler;
+  /**
+   * MCP tool annotations passed through to tools/list (5.3 WS1 O1).
+   * Only tool-level hints that are true for EVERY action of the tool —
+   * e.g. observe (all actions are reads) — not mixed-action tools.
+   */
+  annotations?: ToolAnnotations;
+}
+
+/** MCP tool annotations (subset the MCP spec defines as hints). */
+export interface ToolAnnotations {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  openWorldHint?: boolean;
+  [key: string]: unknown;
+}
+
+// ─── WebMCP Passthrough State (5.3 WS3) ─────────────────────────────
+
+/** A page-registered WebMCP tool as delivered by CDP WebMCP.toolsAdded. */
+export interface WebMcpToolInfo {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+  frameId: string;
+  annotations?: Record<string, unknown>;
+}
+
+/** Pending WebMCP invocation awaiting its toolResponded event. */
+export interface WebMcpInvocation {
+  resolve: (response: { status: string; output?: unknown; errorText?: string; exceptionDescription?: string }) => void;
+  timer: NodeJS.Timeout;
 }
 
 // ─── CDP Event Pipeline State ───────────────────────────────────────
@@ -321,4 +367,15 @@ export interface ServerContext {
 
   /** Per-session pending fetch requests (sessionId → Map<requestId, info>). */
   pendingFetchRequests: Map<string, Map<string, FetchRequestInfo>>;
+
+  /**
+   * WebMCP page-registered tool registry (CDP sessionId → toolName → info),
+   * populated by the event pipeline from WebMCP.toolsAdded/toolsRemoved
+   * (5.3 WS3). Discovery is event-driven — the protocol has no listing
+   * method; WebMCP.enable replays currently-registered tools.
+   */
+  webmcpTools: Map<string, Map<string, WebMcpToolInfo>>;
+
+  /** Pending WebMCP invocations (invocationId → resolver), resolved by WebMCP.toolResponded. */
+  webmcpInvocations: Map<string, WebMcpInvocation>;
 }

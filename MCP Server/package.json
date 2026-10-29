@@ -1,6 +1,6 @@
 {
   "name": "cdp-mcp-server",
-  "version": "5.2.0",
+  "version": "5.3.0",
   "description": "The power user's browser MCP — connects to your real Chrome/Edge/Brave with full DevTools capabilities",
   "type": "module",
   "main": "dist/index.js",

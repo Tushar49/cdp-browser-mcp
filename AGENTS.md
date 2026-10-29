@@ -1,6 +1,6 @@
 # cdp-browser-mcp — AGENTS.md
 
-**Branches:** main (public) · dev (working) · **Version:** 5.0.2
+**Branches:** main (public) · dev (working) · **Version:** 5.3.0
 Contributor + agent guide for this repo — identical file on both branches.
 Short on purpose — details live in
 CONTRIBUTING.md (workflow), README.md (product), CHANGELOG.md (history).
@@ -22,7 +22,7 @@ Chrome CDP-based MCP server. Connects to the user's **real running browser**
 │   ├── src/connection/        # CDP client, health monitor, browser discovery
 │   ├── src/session/           # session manager, tab ownership, modal state
 │   ├── src/snapshot/          # accessibility snapshots, element refs, token optimizer
-│   ├── src/tools/             # 15 tools / 100+ actions (registry.ts wires all)
+│   ├── src/tools/             # 15 tools / 130+ actions (registry.ts wires all)
 │   ├── src/utils/             # wait, retry, errors, response builder
 │   ├── src/__tests__/         # unit + integration + benchmarks
 │   └── server.js              # REMOVED in v5 alpha.4 (parked: _archive/legacy-server-v4.js, dev-only)
@@ -83,6 +83,11 @@ code:
 Machine-specific absolute paths live only in local tool config, never in
 repo files. Package-manager preference: pnpm / `pnpm dlx` first; npx/npm
 only when pnpm is unavailable.
+Competitor/reference checkouts (see `_archive/development/competitors.md`
+for the brief): refreshing them with plain `git pull` is fine; if a
+clone/pull fails on repository ownership, delete the folder and
+re-clone. **Never modify global git config (safe.directory etc.)
+without the maintainer's explicit approval.**
 
 ## Development rules
 

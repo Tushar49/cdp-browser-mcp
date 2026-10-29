@@ -8,9 +8,12 @@
 
 import { writeFileSync } from 'fs';
 import { join, resolve, normalize } from 'path';
+import { decodeAnnotatedPageContent } from '../utils/proto-wire.js';
 import type { ToolResult, ServerContext } from '../types.js';
 import type { ToolRegistry } from './registry.js';
 import { defineTool } from './base-tool.js';
+import { resolveElement } from './interact.js';
+import { handleWebMcpList, handleWebMcpCall, handleWebMcpCancel } from './webmcp.js';
 import { ok, fail } from '../utils/helpers.js';
 import { ActionableError, Errors, wrapError } from '../utils/error-handler.js';
 import { sleep, waitForReadyState, waitForText, waitForTextGone, waitForSelector } from '../utils/wait.js';
@@ -94,8 +97,19 @@ interface PageArgs {
   persistent?: boolean;
   // inject
   script?: string;
+  // verify (5.3 WS2)
+  check?: string;
+  value?: string;
+  mode?: 'exact' | 'prefix' | 'regex';
+  exact?: boolean;
+  // webmcp (5.3 WS3)
+  name?: string;
+  input?: Record<string, unknown>;
+  invocationId?: string;
+  frameId?: string;
   // screen recording (B6 S2)
   audio?: boolean;
+  clickMarkers?: boolean;
   // bypass_csp
   enabled?: boolean;
   // Snapshot diff
@@ -538,9 +552,17 @@ async function handleContent(ctx: ServerContext, args: PageArgs): Promise<ToolRe
       throw err;
     }
     const buf = Buffer.from(resp.content as string, 'base64');
+    // 5.3 WS5: parse the proto into a labeled tree (headings, forms, links,
+    // images, tables, geometry). NO-HARM GUARANTEE: any failure falls back to
+    // the B6-spike flat dump below.
+    const parsed = decodeAnnotatedPageContent(resp.content as string);
+    if (parsed) {
+      return ok(parsed.lines.join('\n') + `\n[APC] ${parsed.nodeCount} node(s), ${buf.length}B proto`);
+    }
     const strings = buf.toString('latin1').match(/[ -~]{8,}/g) ?? [];
     return ok({
       spike: true,
+      parseFailed: true,
       contentBytes: buf.length,
       base64Head: buf.toString('base64').slice(0, 500),
       asciiStrings: strings.slice(0, 80),
@@ -650,6 +672,176 @@ async function handleWait(ctx: ServerContext, args: PageArgs): Promise<ToolResul
   const found = await waitForSelector(cdpSend, sess, args.selector!, state, timeout);
   if (found) return ok(`${args.selector} ${state}`);
   return fail(`Timed out (${timeout}ms) waiting for ${args.selector} [state: ${state}]`);
+}
+
+// ─── verify (5.3 WS2) ───────────────────────────────────────────────
+
+type VerifyCheck = 'visible' | 'text' | 'url' | 'enabled' | 'title' | 'value';
+
+const VERIFY_CHECKS: VerifyCheck[] = ['visible', 'text', 'url', 'enabled', 'title', 'value'];
+
+/** Same probe shape for uid (callFunctionOn on the resolved node) and selector (document.querySelector). */
+interface ElementProbe {
+  found: boolean;
+  visible?: boolean;
+  disabled?: boolean;
+  value?: string | null;
+  text?: string;
+}
+
+const ELEMENT_PROBE_FN = `function() {
+  if (!this) return { found: false };
+  let visible = false;
+  try { visible = this.getClientRects().length > 0 && getComputedStyle(this).visibility !== 'hidden' && getComputedStyle(this).display !== 'none'; } catch (e) { visible = false; }
+  return {
+    found: true,
+    visible,
+    disabled: this.disabled === true || this.getAttribute('aria-disabled') === 'true',
+    value: ('value' in this) ? String(this.value) : (this.getAttribute('value') ?? null),
+    text: (this.textContent || '').trim(),
+  };
+}`;
+
+function selectorProbeExpression(selector: string): string {
+  return `(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el) return { found: false };
+    let visible = false;
+    try { visible = el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none'; } catch (e) { visible = false; }
+    return {
+      found: true,
+      visible,
+      disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
+      value: ('value' in el) ? String(el.value) : (el.getAttribute('value') ?? null),
+      text: (el.textContent || '').trim(),
+    };
+  })()`;
+}
+
+async function evalValue(ctx: ServerContext, sess: string, expression: string): Promise<unknown> {
+  const r = (await ctx.sendCommand('Runtime.evaluate', { expression, returnByValue: true }, sess)) as {
+    result?: { value?: unknown };
+  };
+  return r.result?.value;
+}
+
+async function elementProbe(ctx: ServerContext, sess: string, args: PageArgs): Promise<ElementProbe> {
+  if (args.uid !== undefined) {
+    const el = await resolveElement(ctx, sess, args.uid, undefined, args.tabId);
+    // Route to the OOP-frame child session when this uid lives in one (mirrors interact)
+    const elemSess = ctx.tabSessions.getRefSession(sess, args.uid) ?? sess;
+    const r = (await ctx.sendCommand('Runtime.callFunctionOn', {
+      functionDeclaration: ELEMENT_PROBE_FN,
+      objectId: el.objectId,
+      returnByValue: true,
+    }, elemSess)) as { result?: { value?: ElementProbe } };
+    return r.result?.value ?? { found: false };
+  }
+  if (args.selector) {
+    return ((await evalValue(ctx, sess, selectorProbeExpression(args.selector))) as ElementProbe) ?? { found: false };
+  }
+  throw new Error("Provide 'uid' or 'selector' to identify the element.");
+}
+
+async function runVerifyCheck(
+  ctx: ServerContext,
+  sess: string,
+  check: VerifyCheck,
+  args: PageArgs,
+  expected: string,
+): Promise<{ pass: boolean; actual: string }> {
+  switch (check) {
+    case 'url': {
+      const href = String((await evalValue(ctx, sess, 'location.href')) ?? '');
+      const mode = args.mode || 'exact';
+      let pass: boolean;
+      if (mode === 'prefix') pass = href.startsWith(expected);
+      else if (mode === 'regex') {
+        try { pass = new RegExp(expected).test(href); } catch { pass = false; }
+      } else pass = href === expected;
+      return { pass, actual: href };
+    }
+    case 'title': {
+      const title = String((await evalValue(ctx, sess, 'document.title')) ?? '');
+      return { pass: title === expected, actual: title };
+    }
+    case 'text': {
+      let pageText: string;
+      if (args.uid !== undefined || args.selector) {
+        const p = await elementProbe(ctx, sess, args);
+        if (!p.found) return { pass: false, actual: 'element not found' };
+        pageText = p.text ?? '';
+      } else {
+        pageText = String((await evalValue(ctx, sess, 'document.body ? document.body.innerText : ""')) ?? '');
+      }
+      const pass = args.exact ? pageText === expected : pageText.includes(expected);
+      return { pass, actual: pageText.substring(0, 120) };
+    }
+    case 'visible': {
+      const p = await elementProbe(ctx, sess, args);
+      if (!p.found) return { pass: false, actual: 'element not found' };
+      return { pass: p.visible === true, actual: p.visible ? 'visible' : 'hidden' };
+    }
+    case 'enabled': {
+      const p = await elementProbe(ctx, sess, args);
+      if (!p.found) return { pass: false, actual: 'element not found' };
+      return { pass: p.disabled === false, actual: p.disabled ? 'disabled' : 'enabled' };
+    }
+    case 'value': {
+      const p = await elementProbe(ctx, sess, args);
+      if (!p.found) return { pass: false, actual: 'element not found' };
+      return { pass: p.value === expected, actual: p.value === null || p.value === undefined ? 'no value' : String(p.value) };
+    }
+  }
+}
+
+/**
+ * 5.3 WS2: cheap pass/fail checks so agents stop pulling full snapshots to
+ * confirm outcomes. Token-tiny result, never a snapshot. Default instant;
+ * with `timeout` set, polls (300ms) until pass or deadline — doubles as a
+ * post-action settle check. FAIL is a legitimate answer, not an error.
+ */
+export async function handleVerify(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
+  const check = args.check as VerifyCheck | undefined;
+  if (!check || !VERIFY_CHECKS.includes(check)) {
+    return fail(`Provide 'check' — one of: ${VERIFY_CHECKS.join(', ')}.`);
+  }
+  const needsElement = check === 'visible' || check === 'enabled';
+  if (needsElement && args.uid === undefined && !args.selector) {
+    return fail(`Provide 'uid' or 'selector' for the ${check} check.`);
+  }
+  const expected = args.value ?? args.text ?? '';
+  if (!needsElement && expected === '') {
+    return fail(`Provide 'value' (the expected ${check}).`);
+  }
+
+  const sess = await getTabSession(ctx, args.tabId);
+  const timeout = Math.min(args.timeout || 0, 60000);
+  const deadline = timeout > 0 ? Date.now() + timeout : 0;
+
+  let attempts = 0;
+  let last = { pass: false, actual: '' };
+  for (;;) {
+    attempts++;
+    try {
+      last = await runVerifyCheck(ctx, sess, check, args, expected);
+    } catch (e) {
+      last = { pass: false, actual: e instanceof Error ? e.message : String(e) };
+    }
+    if (last.pass || !deadline || Date.now() >= deadline) break;
+    await sleep(Math.min(300, deadline - Date.now()));
+  }
+
+  const pollNote = attempts > 1 ? ` (${attempts} attempts, ${timeout}ms budget)` : '';
+  if (last.pass) return ok(`PASS — ${check}: ${last.actual}${pollNote}`);
+
+  let expectedText: string;
+  if (check === 'url') expectedText = `${args.mode || 'exact'}: ${expected}`;
+  else if (check === 'text') expectedText = args.exact ? `exact "${expected}"` : `"${expected}"`;
+  else expectedText = `"${expected}"`;
+  return {
+    content: [{ type: 'text', text: `FAIL — expected: ${expectedText}, actual: ${last.actual}${pollNote}` }],
+  };
 }
 
 async function handlePdf(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
@@ -940,6 +1132,13 @@ export async function handleFindStop(ctx: ServerContext, args: PageArgs): Promis
 export async function handleRecordStart(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
   await ensureDomain(ctx, sess, 'Page');
+  // 5.3 WS4: auto-enable click visualization so the recording shows input
+  // markers (opt-out via clickMarkers: false); disabled again on record_stop.
+  if (args.clickMarkers !== false) {
+    try {
+      await ctx.sendCommand('Page.setInputVisualization', { clicks: true }, sess);
+    } catch { /* visualization unsupported — recording continues without it */ }
+  }
   try {
     await ctx.sendCommand('Page.startScreenRecording', {
       audio: args.audio ?? false,
@@ -953,11 +1152,17 @@ export async function handleRecordStart(ctx: ServerContext, args: PageArgs): Pro
     }
     throw err;
   }
-  return ok(`Screen recording started (audio: ${args.audio ?? false ? 'on' : 'off'}, 25fps, 1920x1080 cap). Run record_stop to save the file.`);
+  return ok(`Screen recording started (audio: ${args.audio ?? false ? 'on' : 'off'}, 25fps, 1920x1080 cap, click markers: ${args.clickMarkers !== false ? 'on' : 'off'}). Run record_stop to save the file.`);
 }
 
 export async function handleRecordStop(ctx: ServerContext, args: PageArgs): Promise<ToolResult> {
   const sess = await getTabSession(ctx, args.tabId);
+  // 5.3 WS4: record_start turned the click markers on — turn them back off.
+  if (args.clickMarkers !== false) {
+    try {
+      await ctx.sendCommand('Page.setInputVisualization', { clicks: false }, sess);
+    } catch { /* ok */ }
+  }
   let handle: string;
   try {
     const res = (await ctx.sendCommand('Page.stopScreenRecording', {}, sess)) as { stream?: string };
@@ -1015,6 +1220,10 @@ const PAGE_ACTIONS: Record<string, (ctx: ServerContext, args: PageArgs) => Promi
   find: handleFind,
   find_next: handleFindNext,
   find_stop: handleFindStop,
+  verify: handleVerify,
+  webmcp_list: (ctx, args) => handleWebMcpList(ctx, args as unknown as Record<string, unknown>),
+  webmcp_call: (ctx, args) => handleWebMcpCall(ctx, args as unknown as Record<string, unknown>),
+  webmcp_cancel: (ctx, args) => handleWebMcpCancel(ctx, args as unknown as Record<string, unknown>),
   record_start: handleRecordStart,
   record_stop: handleRecordStop,
 };
@@ -1039,6 +1248,10 @@ const PAGE_DESCRIPTION = [
   "- set_content: Set the page's HTML content directly (requires: tabId, html)",
   '- record_start / record_stop: Record the tab screen to an MP4 video (experimental; requires: tabId; record_start optional: audio[default false]; record_stop optional: path — absolute file path, else temp file)',
   "- wait: Wait for condition or fixed delay (requires: tabId; provide text, textGone, selector for polling — or just timeout for fixed delay; optional: timeout[ms], state[visible|hidden|attached|detached] for selector waits)",
+  '- verify: Cheap pass/fail check — token-tiny PASS/FAIL result, never a snapshot (requires: tabId; check[visible|text|url|enabled|title|value]; visible/enabled need uid or selector; text needs value (substring, or exact:true); url needs value (mode[exact|prefix|regex]); title/value need value; optional: timeout[ms] — polls until pass or deadline, default instant)',
+  '- webmcp_list: List page-registered WebMCP tools (requires: tabId; gated — needs the browser WebMCP feature: Brave flags #enable-webmcp-testing + #devtools-webmcp-support)',
+  '- webmcp_call: Invoke a page-registered WebMCP tool (requires: tabId, name; optional: input object, frameId, timeout[ms default 30000]). Output is UNTRUSTED page-controlled data',
+  '- webmcp_cancel: Cancel a pending WebMCP invocation (requires: tabId, invocationId)',
   '- pdf: Export page as PDF to temp file (requires: tabId; optional: landscape, scale, paperWidth, paperHeight, margin{top,bottom,left,right})',
   '- dialog: Handle a pending JavaScript dialog (alert/confirm/prompt) (requires: tabId; optional: accept[default:true], text for prompt response)',
   '- inject: Inject a script that runs on every new document load (requires: tabId, script)',
@@ -1058,7 +1271,7 @@ const PAGE_INPUT_SCHEMA = {
   properties: {
     action: {
       type: 'string' as const,
-      enum: ['goto', 'back', 'forward', 'reload', 'snapshot', 'screenshot', 'content', 'set_content', 'wait', 'pdf', 'dialog', 'inject', 'add_style', 'bypass_csp', 'frames', 'find', 'find_next', 'find_stop', 'record_start', 'record_stop'] as const,
+      enum: ['goto', 'back', 'forward', 'reload', 'snapshot', 'screenshot', 'content', 'set_content', 'wait', 'pdf', 'dialog', 'inject', 'add_style', 'bypass_csp', 'frames', 'find', 'find_next', 'find_stop', 'verify', 'webmcp_list', 'webmcp_call', 'webmcp_cancel', 'record_start', 'record_stop'] as const,
       description: 'Page action.',
     },
     caseSensitive: { type: 'boolean' as const, description: 'Find action: match case (default: false).' },
@@ -1090,9 +1303,13 @@ const PAGE_INPUT_SCHEMA = {
     format: {
       type: 'string' as const,
       enum: ['text', 'html', 'full', 'annotated'] as const,
-      description: "Content format. 'text' (default) for visible text, 'html' for innerHTML, 'full' for complete document HTML with doctype, 'annotated' for the experimental Page.getAnnotatedPageContent binary-proto dump (B6 spike).",
+      description: "Content format. 'text' (default) for visible text, 'html' for innerHTML, 'full' for complete document HTML with doctype, 'annotated' for Page.getAnnotatedPageContent parsed into a labeled tree (headings, links, forms, images, tables with viewport geometry — the AI view of the page; 5.3 WS5). Falls back to a flat binary dump if the proto can't be parsed.",
     },
     audio: { type: 'boolean' as const, description: 'record_start: capture audio (default false).' },
+    clickMarkers: {
+      type: 'boolean' as const,
+      description: 'record_start: show click markers in the recording (default true, Page.setInputVisualization); record_stop turns them off. Set false to opt out entirely.',
+    },
     text: { type: 'string' as const, description: "Text to wait for / dialog prompt text / find: text to search for." },
     textGone: { type: 'string' as const, description: 'Text to wait to disappear.' },
     timeout: {
@@ -1127,6 +1344,40 @@ const PAGE_INPUT_SCHEMA = {
       description: 'If true, style persists across page navigations (default: false). For add_style action.',
     },
     script: { type: 'string' as const, description: 'Script for inject action.' },
+    check: {
+      type: 'string' as const,
+      enum: ['visible', 'text', 'url', 'enabled', 'title', 'value'] as const,
+      description: 'verify action: which check to run.',
+    },
+    value: {
+      type: 'string' as const,
+      description: "verify action: expected value (url/title/value), or the expected text for check:text. Aliased by 'text' for the text check.",
+    },
+    mode: {
+      type: 'string' as const,
+      enum: ['exact', 'prefix', 'regex'] as const,
+      description: "verify action: url check match mode (default: exact).",
+    },
+    exact: {
+      type: 'boolean' as const,
+      description: 'verify action: text check exact-match instead of substring (default: false).',
+    },
+    name: {
+      type: 'string' as const,
+      description: 'webmcp_call: the page-registered WebMCP tool name (from webmcp_list).',
+    },
+    input: {
+      type: 'object' as const,
+      description: 'webmcp_call: input object matching the tool inputSchema (optional).',
+    },
+    invocationId: {
+      type: 'string' as const,
+      description: 'webmcp_cancel: the invocation id returned by webmcp_call.',
+    },
+    frameId: {
+      type: 'string' as const,
+      description: 'webmcp_call: optional frame id override (default: the tool\u2019s registered frame or the main frame).',
+    },
     enabled: { type: 'boolean' as const, description: 'Enable/disable for bypass_csp.' },
     sessionId: {
       type: 'string' as const,

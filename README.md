@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/cdp-mcp-server"><img src="https://img.shields.io/npm/v/cdp-mcp-server" alt="npm version"></a>
   <img src="https://img.shields.io/badge/tools-15-green" alt="Tools">
-  <img src="https://img.shields.io/badge/sub--actions-120+-green" alt="Actions">
+  <img src="https://img.shields.io/badge/sub--actions-130+-green" alt="Actions">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="License">
 </p>
@@ -38,7 +38,7 @@ CDP Browser MCP Server connects to your **already-running** browser over a WebSo
 | Browser Use needs Python + LLM key | Heavy framework, double LLM cost |
 | BrowserTools MCP is read-only | Can observe but can't automate |
 
-**This server**: connects to Chrome on `localhost:9222`, uses the real browser state, and gives you **100+ automation actions** across 15 tools — built as a modular TypeScript codebase with 2 dependencies. Geolocation spoofing automatically grants browser permissions so permission-based sites just work.
+**This server**: connects to Chrome on `localhost:9222`, uses the real browser state, and gives you **130+ automation actions** across 15 tools - built as a modular TypeScript codebase with 2 dependencies. Geolocation spoofing automatically grants browser permissions so permission-based sites just work.
 
 ---
 
@@ -77,7 +77,7 @@ CDP Browser MCP Server connects to your **already-running** browser over a WebSo
 | Connects to real browser | **Yes** | Via flag only | No (cloud) | No | Read-only |
 | Preserves cookies/sessions | **Yes** | No | No | No | Yes |
 | Works with extensions | **Yes** | No | No | No | Yes |
-| Tool count | **15 tools, 100+ actions** | ~30 tools | ~10 tools | 7 tools | ~13 tools |
+| Tool count | **15 tools, 130+ actions** | ~30 tools | ~10 tools | 7 tools | ~13 tools |
 | Auto-connect | **Yes** (first tool call) | No | N/A | No | No |
 | Auto-waiting after actions | **Yes** | Yes | Yes | No | N/A |
 | Smart form filling | **Yes** (combobox, React Select) | Native `<select>` only | Via AI | No | No |
@@ -298,17 +298,17 @@ When a connection fails, the server auto-detects the failure mode and prints the
 | Tool | Actions | Description |
 |------|---------|-------------|
 | `tabs` | 7 | Tab management — list, find, open, close, activate, info, set profile |
-| `page` | 20 | Navigation, snapshots, screenshots, content extraction, PDF, dialogs, frames, find-in-page, screen recording (MP4) |
+| `page` | 24 | Navigation, snapshots, screenshots, content extraction (incl. parsed annotated-tree), pass/fail verify checks, page-registered WebMCP passthrough, PDF, dialogs, frames, find-in-page, screen recording (MP4) |
 | `interact` | 12 | Click, hover, type, fill, select, press, drag, scroll, upload, focus, check, tap |
 | `form` | 3 | Smart form filling engine — fill, read, clear; handles text, combobox, checkbox, radio, select, date in one call |
 | `execute` | 3 | JavaScript evaluation — expressions, async scripts, element-scoped calls |
 | `observe` | 7 | Console messages, network requests, performance metrics, memory counters, downloads, HAR export |
-| `emulate` | 15 | Viewport, color scheme, geolocation, network throttling, timezone, vision deficiency, device posture, CPU performance tier |
+| `emulate` | 16 | Viewport, color scheme, geolocation, network throttling, timezone, vision deficiency, device posture, CPU performance tier, click-marker visualization |
 | `storage` | 11 | Cookie CRUD, localStorage/sessionStorage management, storage clearing, quota inspection, auth-state export/import |
-| `webauthn` | 11 | Passkey testing with virtual authenticators — create/inject credentials, presence + UV simulation, negative-testing override bits |
+| `webauthn` | 12 | Passkey testing with virtual authenticators — create/inject credentials, credential-property mutation, presence + UV simulation, negative-testing override bits |
 | `intercept` | 6 | HTTP request interception — mock, modify, block network requests |
 | `cleanup` | 7 | Session management, disconnect, temp file cleanup, reset |
-| `browser` | 3 | Chrome/Edge/Brave instance detection, profile listing, connection switching |
+| `browser` | 5 | Chrome/Edge/Brave instance detection, profile listing, connection switching, unpacked-extension listing, opt-in toolbar trigger |
 | `debug` | 21 | JS debugger, breakpoints, resource overrides, DOM/event breakpoints |
 | `ping` | — | Health check — server version, connection status, connection mode |
 | `status` | — | Server status — connection, config, sessions |
@@ -339,7 +339,7 @@ When a connection fails, the server auto-detects the failure mode and prints the
 | `reload` | Reload page | `tabId` | `ignoreCache`, `waitUntil`, `timeout` |
 | `snapshot` | Accessibility tree with element refs | `tabId` | `interactive`, `search`, `maxLength` |
 | `screenshot` | Capture page or element as image (fullPage scrolls SPA containers to trigger lazy loading) | `tabId` | `fullPage`, `quality`, `uid`, `type`, `path` |
-| `content` | Extract text, HTML, or full document source | `tabId` | `uid`, `selector`, `format`(`text`\|`html`\|`full`\|`annotated` - experimental: `Page.getAnnotatedPageContent` dump; flat ASCII signal, no refs) |
+| `content` | Extract text, HTML, full document source, or the parsed annotated-content tree (format:'annotated' — labeled headings/links/forms/tables with viewport geometry, 5.3 WS5) | `tabId` | `uid`, `selector`, `format`(`text`\|`html`\|`full`\|`annotated`) |
 | `set_content` | Set page HTML content directly | `tabId`, `html` | — |
 | `wait` | Wait for condition or fixed delay | `tabId` | `text`, `textGone`, `selector`, `state`, `timeout`(ms) |
 | `pdf` | Export page as PDF | `tabId` | `landscape`, `scale`, `paperWidth`, `paperHeight`, `margin` |
@@ -349,7 +349,9 @@ When a connection fails, the server auto-detects the failure mode and prints the
 | `bypass_csp` | Disable Content Security Policy | `tabId` | `enabled` |
 | `frames` | List all frames with id, URL, origin, depth (same-origin + OOP iframes) | `tabId` | — |
 | `find` / `find_next` / `find_stop` | Find text in page, cycle matches with wrap-around, stop (counts visible matches; `window.find` skips hidden text) | `tabId`, `text` (find) | `caseSensitive` |
-| `record_start` / `record_stop` | Record the tab screen to an MP4 video (experimental, recent Chromium only) | `tabId` | `audio`, `path` (stop) |
+| `verify` | Cheap pass/fail checks (`visible`, `text`, `url`, `enabled`, `title`, `value`) — polls until pass with `timeout`; token-tiny result | `tabId`, `check`, `value` | `uid`, `selector`, `timeout`, `mode` (text/url) |
+| `webmcp_list` / `webmcp_call` / `webmcp_cancel` | Drive WebMCP tools a page registered (`document.modelContext`): list, invoke (with timeout), cancel pending — output is UNTRUSTED page-controlled data (Chrome 153+ with WebMCP flags) | `tabId`, `name`+`arguments` (call) | `frameId`, `timeoutMs`, `invocationId` (cancel) |
+| `record_start` / `record_stop` | Record the tab screen to an MP4 video (experimental, recent Chromium only; click markers auto-enabled — `clickMarkers: false` opts out) | `tabId` | `audio`, `clickMarkers`, `path` (stop) |
 
 ### `interact` — Element Interaction
 
@@ -431,6 +433,7 @@ Set any combination of properties in a single call:
 | `idle` | Emulate idle/locked screen state | `active`, `locked` |
 | `devicePosture` | Foldable device posture (Chrome 153+) | `continuous`, `folded` |
 | `cpuPerformance` | CPU performance tier (Chrome 153/154+) | `low`, `mid`, `high`, `ultra` |
+| `inputVisualization` | Click-marker visualization via `Page.setInputVisualization` (Chrome 153+; cleared by `reset`) | boolean |
 | `reset` | Clear all overrides | `true` |
 
 ### `storage` — Cookie & Storage Management
@@ -472,12 +475,13 @@ NotAllowedError — reload and retry, or pre-provision credentials with
 | `remove_authenticator` | Remove an authenticator | `authenticatorId` | — |
 | `list_authenticators` | List authenticators created by this server | — | — |
 | `add_credential` | Inject a pre-made credential (privateKey = PKCS#8 DER of an ECDSA P-256 key, base64) | `authenticatorId`, `credentialId`(b64), `privateKey`(b64), `rpId` | `userHandle`(b64), `isResidentCredential`, `signCount`, `largeBlob`(b64), `backupEligibility`, `backupState`, `userName`, `userDisplayName` |
-| `list_credentials` | List credentials stored on an authenticator | `authenticatorId` | — |
+| `list_credentials` | List credentials stored on an authenticator (`fullIds` prints untruncated IDs — needed for `remove_credential`/`set_credential_properties`) + `last:` lifecycle-event lines (added/updated/asserted/deleted) | `authenticatorId` | `fullIds` |
 | `remove_credential` | Remove one credential | `authenticatorId`, `credentialId` | — |
 | `clear_credentials` | Remove all credentials | `authenticatorId` | — |
 | `set_user_verified` | Make user verification succeed/fail (fail = sites requiring UV get NotAllowedError) | `authenticatorId` | `isUserVerified` (default true) |
 | `set_presence_simulation` | Auto-approve or hang user-presence tests (hang = test timeout paths) | `authenticatorId` | `enabled` (default true) |
 | `set_override_bits` | Negative testing — sabotage the next response: zero signature / UV flag / UP flag | `authenticatorId` | `isBogusSignature`, `isBadUV`, `isBadUP` |
+| `set_credential_properties` | Mutate a stored credential: backup flags and/or signature counter (`signCount: -1` REMOVES the counter — test signCount-monotonicity handling in relying parties) | `authenticatorId`, `credentialId` | `backupEligibility`, `backupState`, `signCount` |
 | `reset` | Remove ALL authenticators on a tab + disable the environment | `tabId` | — |
 
 ### `intercept` — HTTP Request Interception
@@ -510,6 +514,8 @@ NotAllowedError — reload and retry, or pre-provision credentials with
 | `profiles` | List all Chrome instances with profiles | — | — |
 | `connect` | Switch to a different Chrome instance | `instance` | — |
 | `active` | Show current connection info | — | — |
+| `extensions` | List UNPACKED extensions (id, name, version, path, enabled) — empty list on a stock profile is expected, not an error | — | — |
+| `trigger_extension` | Fire an extension toolbar action — programmatic equivalent of clicking the extension icon; OPT-IN via `CDP_EXTENSION_TRIGGER_ALLOWLIST` (exact IDs); results are UNTRUSTED | `id`, `tabId` | — |
 
 ### `debug` — JavaScript Debugger & Resource Overrides
 

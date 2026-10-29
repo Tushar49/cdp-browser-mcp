@@ -41,6 +41,8 @@ import { SnapshotCache } from './snapshot/cache.js';
 import { ToolRegistry } from './tools/registry.js';
 import { preprocessToolCall } from './tools/dispatch.js';
 import { defineTool, success } from './tools/base-tool.js';
+import { listTools } from './tools/list-tools.js';
+import { applyWebMcpEvent, clearWebMcpState } from './tools/webmcp.js';
 import { ActionableError, wrapError } from './utils/error-handler.js';
 import type { ServerContext, FileChooserHandler } from './types.js';
 
@@ -63,7 +65,7 @@ import { getSlimTools, mapSlimToFull } from './tools/slim-mode.js';
 
 // ─── Bootstrap ──────────────────────────────────────────────────────
 
-const VERSION = '5.2.0';
+const VERSION = '5.3.0';
 
 const config = loadConfig();
 
@@ -104,6 +106,7 @@ cdpClient.on('disconnected', () => {
   // dialog's event on re-attach, so kept entries would block tools forever.
   ctx.findState.clear();
   ctx.modalStates.clearAll();
+  clearWebMcpState(ctx);
   healthMonitor.onDisconnect().catch(() => {
     // Reconnect failed — next tool call will trigger autoConnect
   });
@@ -407,6 +410,43 @@ function wireEventPipeline(serverCtx: ServerContext): void {
         break;
       }
 
+      // ── WebMCP passthrough (5.3 WS3) ──
+      case 'WebMCP.toolsAdded':
+      case 'WebMCP.toolsRemoved':
+      case 'WebMCP.toolInvoked':
+      case 'WebMCP.toolResponded':
+        applyWebMcpEvent(serverCtx, event.method, sessionId, params);
+        break;
+
+      // ── WebAuthn credential events (5.3 WS4 — surfaced into list_credentials) ──
+      case 'WebAuthn.credentialAdded':
+      case 'WebAuthn.credentialUpdated':
+      case 'WebAuthn.credentialAsserted': {
+        const credential = params.credential as { credentialId?: string; signCount?: number } | undefined;
+        const kind = event.method === 'WebAuthn.credentialAdded' ? 'added' as const
+          : event.method === 'WebAuthn.credentialUpdated' ? 'updated' as const
+          : 'asserted' as const;
+        if (credential?.credentialId) {
+          serverCtx.webauthnState.noteCredentialEvent(
+            params.authenticatorId as string,
+            kind,
+            credential.credentialId,
+            credential.signCount,
+          );
+        }
+        break;
+      }
+      case 'WebAuthn.credentialDeleted': {
+        if (params.credentialId) {
+          serverCtx.webauthnState.noteCredentialEvent(
+            params.authenticatorId as string,
+            'deleted',
+            params.credentialId as string,
+          );
+        }
+        break;
+      }
+
       // ── Debugger events ──
       case 'Debugger.paused': {
         const pauseTs = Date.now();
@@ -508,6 +548,8 @@ const ctx: ServerContext = {
   pendingFileChoosers: new Map(),
   pausedTabs: new Map(),
   pendingFetchRequests: new Map(),
+  webmcpTools: new Map(),
+  webmcpInvocations: new Map(),
 };
 
 // ─── Auto-connect with mutex (P0-2) ────────────────────────────────
@@ -535,6 +577,7 @@ registry.register(
   defineTool({
     name: 'ping',
     description: 'Health check. Returns server version and connection status.',
+    annotations: { readOnlyHint: true },
     inputSchema: { type: 'object', properties: {} },
     handler: async () =>
       success(
@@ -548,6 +591,7 @@ registry.register(
   defineTool({
     name: 'status',
     description: 'Server status: connection, config, sessions.',
+    annotations: { readOnlyHint: true },
     inputSchema: { type: 'object', properties: {} },
     handler: async () => {
       const lines = [
@@ -649,9 +693,7 @@ CALLING CONVENTION (critical): every tool is ONE tool with an action enum parame
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: config.slimMode
-    ? registry.list().filter(t => t.name.startsWith('browser_') || t.name === 'ping' || t.name === 'status')
-    : registry.list(),
+  tools: listTools(registry, config.slimMode),
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {

@@ -12,6 +12,7 @@
 import type { ServerContext } from '../types.js';
 import type { CleanupStrategy } from '../types.js';
 import { Errors } from '../utils/error-handler.js';
+import { ActionableError } from '../utils/error-handler.js';
 
 /** Timestamp of the last stale-session sweep. */
 let lastSweep = 0;
@@ -31,6 +32,44 @@ export function needsTabId(toolName: string, action?: string): boolean {
   if (toolName === 'tabs') return ['info', 'close', 'activate'].includes(action ?? '');
   if (toolName === 'webauthn') return ['add_authenticator', 'reset'].includes(action ?? '');
   return false;
+}
+
+/**
+ * 5.3 WS1 O3 — opt-in origin allow-list. When CDP_ALLOWED_ORIGINS is set,
+ * tab-bound tool calls may only target tabs whose page origin is on the
+ * list. Fail-CLOSED: if the origin cannot be determined (target lookup
+ * failed), the call is blocked too — security-biased by design.
+ */
+export async function checkAllowedOrigin(
+  ctx: ServerContext,
+  tabId: string,
+  toolName: string,
+): Promise<void> {
+  const allowed = ctx.config.allowedOrigins;
+  if (!allowed || allowed.length === 0) return;
+
+  let origin = '';
+  try {
+    const targets = (await ctx.sendCommand('Target.getTargets', {})) as {
+      targetInfos?: Array<{ targetId: string; url?: string }>;
+    };
+    const url = targets?.targetInfos?.find((t) => t.targetId === tabId)?.url ?? '';
+    origin = new URL(url).origin;
+  } catch {
+    origin = '';
+  }
+
+  const normalized = allowed.map((o) => o.replace(/\/+$/, ''));
+  if (!origin || origin === 'null' || !normalized.includes(origin)) {
+    throw new ActionableError(
+      `Origin "${origin || 'unknown'}" is not on the allowed-origins list ` +
+        `(CDP_ALLOWED_ORIGINS; tool: ${toolName}, tab: ${tabId}).`,
+      'Add the origin to the CDP_ALLOWED_ORIGINS environment variable ' +
+        '(comma-separated, e.g. CDP_ALLOWED_ORIGINS=https://example.com) ' +
+        'or remove it to allow all origins.',
+      { origin: origin || 'unknown', tabId, toolName, allowed: normalized },
+    );
+  }
 }
 
 /**
@@ -101,6 +140,12 @@ export async function preprocessToolCall(
   // (tabs list/find/new, webauthn authenticatorId actions, cleanup, …).
   if (!args.tabId && needsTabId(toolName, args.action as string | undefined)) {
     args.tabId = await autoResolveTabId(ctx);
+  }
+
+  // 2.6 Opt-in origin allow-list (5.3 WS1 O3): tab-bound calls only.
+  const tabId0 = args.tabId as string | undefined;
+  if (tabId0 && needsTabId(toolName, args.action as string | undefined)) {
+    await checkAllowedOrigin(ctx, tabId0, toolName);
   }
 
   // 3. If tabId provided, claim tab lock if unowned

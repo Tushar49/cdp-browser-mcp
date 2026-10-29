@@ -1116,7 +1116,7 @@ async function getTabSession(ctx: ServerContext, tabId: string): Promise<string>
  * Resolve an element's position and metadata for interaction.
  * Uses uid (preferred) or CSS selector to locate the element.
  */
-async function resolveElement(
+export async function resolveElement(
   ctx: ServerContext,
   sess: string,
   uid?: number,

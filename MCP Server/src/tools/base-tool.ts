@@ -17,12 +17,14 @@ export function defineTool(opts: {
   description: string;
   inputSchema: Record<string, unknown>;
   handler: ToolHandler;
+  annotations?: ToolDefinition['annotations'];
 }): ToolDefinition {
   return {
     name: opts.name,
     description: opts.description,
     inputSchema: opts.inputSchema,
     handler: opts.handler,
+    ...(opts.annotations ? { annotations: opts.annotations } : {}),
   };
 }
 

@@ -23,7 +23,7 @@ import { fail, ok } from '../utils/helpers.js';
 import { Errors } from '../utils/error-handler.js';
 import { defineTool } from './base-tool.js';
 import type { ToolRegistry } from './registry.js';
-import { WebAuthnStateManager, type AuthenticatorRecord } from '../session/webauthn-state.js';
+import { WebAuthnStateManager, type AuthenticatorRecord, type CredentialActivity } from '../session/webauthn-state.js';
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -134,11 +134,11 @@ function describeOptions(options: Record<string, unknown>): string {
   return parts.join(', ');
 }
 
-function formatCredential(c: Record<string, unknown>): string {
+function formatCredential(c: Record<string, unknown>, activity?: CredentialActivity, fullId = false): string {
   const id = String(c.credentialId ?? '');
   const lines = [
-    `- credentialId: ${id.slice(0, 24)}${id.length > 24 ? '…' : ''}`,
-    `  rpId: ${c.rpId ?? '(none)'} | resident: ${c.isResidentCredential ? 'yes' : 'no'} | signCount: ${c.signCount ?? 0}`,
+    `- credentialId: ${fullId ? id : id.slice(0, 24) + (id.length > 24 ? '…' : '')}`,
+    `  rpId: ${c.rpId ?? '(none)'} | resident: ${c.isResidentCredential ? 'yes' : 'no'} | signCount: ${c.signCount === -1 ? 'none' : (c.signCount ?? 0)}`,
   ];
   const userBits: string[] = [];
   if (c.userName) userBits.push(`user: ${c.userName}`);
@@ -151,6 +151,11 @@ function formatCredential(c: Record<string, unknown>): string {
     flags.push(`largeBlob: ${Buffer.from(String(c.largeBlob), 'base64').length}B`);
   }
   if (flags.length) lines.push(`  ${flags.join(' | ')}`);
+  if (activity) {
+    const time = new Date(activity.lastTs).toLocaleTimeString();
+    const sc = activity.signCount !== undefined ? `, signCount ${activity.signCount}` : '';
+    lines.push(`  last: ${activity.lastEvent} ${time}${sc}`);
+  }
   return lines.join('\n');
 }
 
@@ -284,7 +289,9 @@ export async function handleListCredentials(ctx: ServerContext, p: Record<string
     return ok(`Authenticator ${authenticatorId.slice(0, 12)}… holds 0 credentials. ` +
       'Credentials appear after the page runs navigator.credentials.create (or inject one: add_credential).');
   }
-  const formatted = creds.map(formatCredential).join('\n');
+  const activity = ctx.webauthnState.credentialActivity(authenticatorId);
+  const fullIds = p.fullIds === true;
+  const formatted = creds.map((c) => formatCredential(c, activity?.get(String(c.credentialId)), fullIds)).join('\n');
   return ok(`Authenticator ${authenticatorId.slice(0, 12)}… holds ${creds.length} credential(s):\n${formatted}`);
 }
 
@@ -358,6 +365,43 @@ export async function handleSetOverrideBits(ctx: ServerContext, p: Record<string
     : 'Response override bits CLEARED — authenticator responses are genuine again.');
 }
 
+/**
+ * 5.3 WS4: mutate a stored credential — backup flags and/or the signature
+ * counter. `signCount: -1` removes the counter (protocol-verified; great for
+ * testing signCount-monotonicity handling in relying parties).
+ */
+export async function handleSetCredentialProperties(ctx: ServerContext, p: Record<string, unknown>): Promise<ToolResult> {
+  const authenticatorId = p.authenticatorId as string;
+  const credentialId = p.credentialId as string;
+  if (!credentialId) return fail('set_credential_properties requires credentialId — get it from list_credentials.');
+  const sess = await ownerSession(ctx, authenticatorId);
+  await ctx.capabilities.require(ctx.cdpClient, 'WebAuthn', undefined, sess);
+
+  const props: Record<string, unknown> = { authenticatorId, credentialId: normalizeBase64(credentialId) };
+  const changes: string[] = [];
+  if (p.backupEligibility !== undefined) {
+    props.backupEligibility = p.backupEligibility;
+    changes.push(`backupEligibility: ${p.backupEligibility}`);
+  }
+  if (p.backupState !== undefined) {
+    props.backupState = p.backupState;
+    changes.push(`backupState: ${p.backupState}`);
+  }
+  if (p.signCount !== undefined) {
+    props.signCount = p.signCount;
+    changes.push(p.signCount === -1 ? 'signCount: counter REMOVED' : `signCount: ${p.signCount}`);
+  }
+  if (!changes.length) {
+    return fail('Provide at least one of: backupEligibility, backupState, signCount (-1 removes the counter).');
+  }
+  try {
+    await ctx.sendCommand('WebAuthn.setCredentialProperties', props, sess);
+  } catch (err) {
+    return mapCdpWebAuthnError(ctx, err);
+  }
+  return ok(`Credential properties updated — ${changes.join(', ')}.`);
+}
+
 export async function handleReset(ctx: ServerContext, p: Record<string, unknown>): Promise<ToolResult> {
   const tabId = p.tabId as string;
   const sess = await getTabSession(ctx, tabId);
@@ -394,7 +438,8 @@ function defineWebauthnTool() {
   const actions = [
     'add_authenticator', 'remove_authenticator', 'list_authenticators',
     'add_credential', 'list_credentials', 'remove_credential', 'clear_credentials',
-    'set_user_verified', 'set_presence_simulation', 'set_override_bits', 'reset',
+    'set_user_verified', 'set_presence_simulation', 'set_override_bits',
+    'set_credential_properties', 'reset',
   ] as const;
 
   return defineTool({
@@ -402,19 +447,20 @@ function defineWebauthnTool() {
     description: [
       'Use this to test passkey/WebAuthn login flows with virtual authenticators — no real security key needed. Create a virtual authenticator on a tab, then drive the page normally: the browser intercepts navigator.credentials.create/get and the virtual authenticator auto-responds.',
       '',
-      'IMPORTANT: virtual authenticators live in browser memory only — nothing touches the user\'s real keyring. They die when the tab closes, the browser exits, or this server disconnects; they SURVIVE in-tab session re-attaches (process swaps) orphaned from the registry. Create the authenticator BEFORE the page runs its WebAuthn calls. The passkey flow\'s success signal is the PAGE\'s state afterwards — verify with page snapshots, not webauthn return values. Caveat: pages using conditional mediation (page-load autofill WebAuthn) can starve the site\'s own credentials.create — reload first, or pre-provision with add_credential.',
+      'IMPORTANT: virtual authenticators live in browser memory only — nothing touches the user\'s real keyring. They die when the tab closes, the browser exits, or this server disconnects; they SURVIVE in-tab session re-attaches (process swaps) orphaned from the registry. Create the authenticator BEFORE the page runs its WebAuthn calls. The passkey flow\'s success signal is the PAGE\'s state afterwards — verify with page snapshots, not webauthn return values. Caveat: pages using conditional mediation (page-load autofill WebAuthn) can starve the site\'s own credentials.create — reload first, or pre-provision with add_credential. CAVEAT 2: if a password-manager extension with passkey interception is active (Bitwarden, etc.), it proxies ALL page WebAuthn requests at the browser level and the virtual authenticator is bypassed — assertions time out and creates go to the real vault. Disable the extension\'s passkey support when testing virtual-authenticator flows.',
       '',
       'Operations:',
       '- add_authenticator: Create a virtual authenticator (requires: tabId; optional: protocol[ctap2|u2f], transport[internal|usb|nfc|ble|cable|hybrid|smart-card], hasResidentKey, hasUserVerification, isUserVerified, automaticPresenceSimulation, ctap2Version[ctap2_0|ctap2_1|ctap2_2], extensions{prf,largeBlob,credBlob,minPinLength,hmacSecret,cmtgKey}). Defaults: ctap2/internal/resident-key/UV-verified/auto-presence — a platform passkey that approves everything. Re-enables the virtual environment automatically.',
       '- remove_authenticator: Remove one (requires: authenticatorId)',
       '- list_authenticators: List authenticators created by this server (no params)',
       '- add_credential: Inject a pre-made credential (requires: authenticatorId, credentialId[b64], privateKey[b64 PKCS#8], rpId; optional: userHandle[b64], isResidentCredential, signCount, largeBlob[b64], backupEligibility, backupState, userName, userDisplayName)',
-      '- list_credentials: List credentials stored on an authenticator (requires: authenticatorId)',
+      '- list_credentials: List credentials stored on an authenticator (requires: authenticatorId; optional: fullIds — print untruncated credential IDs, needed for remove_credential / set_credential_properties)',
       '- remove_credential: Remove one credential (requires: authenticatorId, credentialId)',
       '- clear_credentials: Remove all credentials (requires: authenticatorId)',
       '- set_user_verified: Make user verification succeed/fail (requires: authenticatorId; optional: isUserVerified, default true)',
       '- set_presence_simulation: Auto-approve or hang user-presence tests (requires: authenticatorId; optional: enabled, default true)',
       '- set_override_bits: Negative testing — sabotage the next authenticator response (requires: authenticatorId; optional: isBogusSignature, isBadUV, isBadUP — zeros the signature / UV flag / UP flag)',
+      '- set_credential_properties: Mutate a stored credential — backup flags and/or the signature counter (requires: authenticatorId, credentialId; optional: backupEligibility, backupState, signCount — signCount -1 REMOVES the counter, useful for testing signCount-monotonicity handling in relying parties). Credential lifecycle events (added/updated/asserted/deleted) surface in list_credentials as "last:" lines',
       '- reset: Remove ALL authenticators on a tab + disable the environment (requires: tabId)',
     ].join('\n'),
     inputSchema: {
@@ -457,6 +503,7 @@ function defineWebauthnTool() {
         isBogusSignature: { type: 'boolean', description: 'set_override_bits: zero the response signature.' },
         isBadUV: { type: 'boolean', description: 'set_override_bits: zero the UV flag.' },
         isBadUP: { type: 'boolean', description: 'set_override_bits: zero the UP flag.' },
+        fullIds: { type: 'boolean', description: 'list_credentials: print full untruncated credential IDs.' },
       },
       required: ['action'],
     },
@@ -473,6 +520,7 @@ function defineWebauthnTool() {
         case 'set_user_verified':      return handleSetUserVerified(ctx, params);
         case 'set_presence_simulation': return handleSetPresenceSimulation(ctx, params);
         case 'set_override_bits':      return handleSetOverrideBits(ctx, params);
+        case 'set_credential_properties': return handleSetCredentialProperties(ctx, params);
         case 'reset':                  return handleReset(ctx, params);
         default:
           return fail(`Unknown webauthn action: "${action}". Use: ${actions.join(', ')}`);
