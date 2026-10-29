@@ -32,7 +32,10 @@ async function handleGetCookies(
     const flags = [c.httpOnly && 'HttpOnly', c.secure && 'Secure', c.sameSite].filter(Boolean).join(', ');
     const exp = (c.expires as number) > 0 ? new Date((c.expires as number) * 1000).toISOString() : 'session';
     const val = c.value as string;
-    return `${c.name}=${val.substring(0, 60)}${val.length > 60 ? '...' : ''}\n  Domain: ${c.domain} | Path: ${c.path} | Expires: ${exp} | ${flags}`;
+    // WS9 CHIPS: surface the partition key so agents see partitioned cookies
+    const pk = c.partitionKey as Record<string, unknown> | undefined;
+    const partitioned = pk ? ` | partitioned: ${pk.topLevelSite ?? '?'}` : '';
+    return `${c.name}=${val.substring(0, 60)}${val.length > 60 ? '...' : ''}\n  Domain: ${c.domain} | Path: ${c.path} | Expires: ${exp} | ${flags}${partitioned}`;
   });
   return ok(`${cookies.length} cookie(s):\n\n${lines.join('\n\n')}`);
 }
@@ -55,6 +58,13 @@ async function handleSetCookie(
   if (params.httpOnly !== undefined) cookieParams.httpOnly = params.httpOnly;
   if (params.sameSite) cookieParams.sameSite = params.sameSite;
   if (params.expires) cookieParams.expires = params.expires;
+  if (params.partitionKey !== undefined) {
+    // WS9 CHIPS: partitioned cookies require Secure (canary-proven on Brave 153)
+    const pk = normalizePartitionKey(params.partitionKey);
+    if (pk.error) return fail(`partitionKey: ${pk.error}`);
+    cookieParams.partitionKey = pk.key;
+    if (cookieParams.secure === undefined) cookieParams.secure = true;
+  }
 
   // If no domain, get from current page
   if (!cookieParams.domain && !cookieParams.url) {
@@ -81,6 +91,14 @@ async function handleDeleteCookies(
   if (params.name) cdpParams.name = params.name;
   if (params.domain) cdpParams.domain = params.domain;
   if (params.url) cdpParams.url = params.url;
+  if (params.partitionKey !== undefined) {
+    // WS9 CHIPS: partition-scoped delete — matches cookies whose partition key
+    // attributes ALL equal the given key (canary: deleteCookies takes the
+    // CookiePartitionKey object).
+    const pk = normalizePartitionKey(params.partitionKey);
+    if (pk.error) return fail(`partitionKey: ${pk.error}`);
+    cdpParams.partitionKey = pk.key;
+  }
 
   if (!cdpParams.name) return fail("Provide 'name' to delete specific cookies.");
 
@@ -257,6 +275,44 @@ async function handleSetStorage(
 interface StateCookie {
   name: string; value: string; domain?: string; url?: string; path?: string;
   expires?: number; httpOnly?: boolean; secure?: boolean; sameSite?: string;
+  /** WS9 CHIPS: Playwright sourceOrigin shorthand string, or the CDP CookiePartitionKey object (export passthrough). */
+  partitionKey?: string | { topLevelSite: string; hasCrossSiteAncestor?: boolean } | Record<string, unknown>;
+}
+
+// ─── WS9 CHIPS (cookie partitioning) helpers ────────────────────────
+
+type PartitionKeyError = { key?: Record<string, unknown>; error?: string };
+
+/**
+ * Normalize the tool-level partitionKey input to the CDP CookiePartitionKey
+ * object shape. Canonical evidence from the WS7 Batch A canary (Brave 153):
+ * - `Network.setCookie` REQUIRES `secure: true` for a partitioned cookie
+ *   ("Sanitizing cookie failed" otherwise)
+ * - `hasCrossSiteAncestor` is MANDATORY on this build (omission → -32602)
+ * - `topLevelSite` is the schemeful-site form with no trailing slash
+ * - Brave's shield silently drops page-JS third-party cookie writes — the
+ *   CDP path is the only verifiable one, so the WS9 gate is CDP-driven.
+ */
+function normalizePartitionKey(raw: unknown): PartitionKeyError {
+  if (typeof raw === 'string') {
+    if (!/^https?:\/\//i.test(raw)) {
+      return { error: 'partitionKey string must be an absolute origin (https://example.com) — the Playwright sourceOrigin shorthand; a bare host is rejected' };
+    }
+    return { key: { topLevelSite: raw.replace(/\/+$/, ''), hasCrossSiteAncestor: false } };
+  }
+  if (raw && typeof raw === 'object') {
+    const o = raw as Record<string, unknown>;
+    if (typeof o.topLevelSite !== 'string' || !/^https?:\/\//i.test(o.topLevelSite)) {
+      return { error: 'partitionKey object requires topLevelSite as an absolute origin (https://…)' };
+    }
+    const hasAncestor = o.hasCrossSiteAncestor === undefined ? false : Boolean(o.hasCrossSiteAncestor);
+    return { key: { topLevelSite: o.topLevelSite.replace(/\/+$/, ''), hasCrossSiteAncestor: hasAncestor } };
+  }
+  return { error: 'partitionKey must be an origin string or an object {topLevelSite, hasCrossSiteAncestor?}' };
+}
+
+function isPartitioned(c: unknown): boolean {
+  return !!(c as Record<string, unknown> | null)?.partitionKey;
 }
 
 interface StateOrigin {
@@ -342,6 +398,14 @@ async function handleImportState(
       p.sameSite = c.sameSite;
       if (c.sameSite === 'None' && c.secure === undefined) p.secure = true;
     }
+    if (c.partitionKey !== undefined) {
+      // WS9 CHIPS: exported partitionKey passes through normalized to the CDP
+      // shape; partitioned sets require Secure (canary-proven on Brave 153).
+      const pk = normalizePartitionKey(c.partitionKey);
+      if (pk.error) { failed++; continue; }
+      p.partitionKey = pk.key;
+      if (p.secure === undefined) p.secure = true;
+    }
     if (!p.domain && !p.url) { failed++; continue; }
     try {
       const r = (await ctx.sendCommand('Network.setCookie', p, sess)) as Record<string, unknown>;
@@ -418,16 +482,16 @@ export function registerStorageTools(
         'Use this to manage cookies and browser storage — inspect auth tokens, set test cookies, read/write localStorage or sessionStorage, or clear site data for a clean state.',
         '',
         'Operations:',
-        '- get_cookies: Retrieve cookies (requires: tabId; optional: urls — filter by URLs)',
-        '- set_cookie: Set a cookie (requires: tabId, name, value; optional: domain, path, secure, httpOnly, sameSite[None|Lax|Strict], expires — epoch seconds)',
-        '- delete_cookies: Delete specific cookies by name (requires: tabId, name; optional: url, domain, path)',
+        '- set_cookie: Set a cookie (requires: tabId, name, value; optional: domain, path, secure, httpOnly, sameSite[None|Lax|Strict], expires — epoch seconds, partitionKey — CHIPS partitioning: origin string (Playwright sourceOrigin shorthand) or {topLevelSite, hasCrossSiteAncestor}; partitioned cookies are set Secure automatically; cleared).',
+        '- delete_cookies: Delete specific cookies by name (requires: tabId, name; optional: url, domain, path, partitionKey — partition-scoped delete)',
+        '- get_cookies: Retrieve cookies (requires: tabId; optional: urls — filter by URLs; partitioned cookies show | partitioned: <topLevelSite>)',
         '- clear_cookies: Clear all cookies for the browser profile (requires: tabId)',
         "- clear_data: Clear browser storage for an origin (requires: tabId; optional: origin, types — comma-separated: 'cookies,local_storage,indexeddb,cache_storage' or 'all')",
         "- quota: Check storage quota usage for the current page's origin (requires: tabId)",
         "- get_storage: Read localStorage/sessionStorage. Without 'key' returns the whole object as JSON (requires: tabId; optional: storageType[local|session, default local], key)",
         '- set_storage: Write a localStorage/sessionStorage key (requires: tabId, key, value; optional: storageType[local|session, default local])',
         '- delete_storage: Remove a key (or clear all when omitted) from localStorage/sessionStorage (requires: tabId; optional: storageType[local|session, default local], key)',
-  '- export_state: One-shot auth-state export — all cookies + current origin\'s localStorage as a Playwright-compatible JSON object (requires: tabId; optional: includeSessionStorage). Feed the returned object into import_state',
+  '- export_state: One-shot auth-state export — all cookies + current origin\'s localStorage as a Playwright-compatible JSON object (requires: tabId; optional: includeSessionStorage; partitioned cookies export with their partitionKey). Feed the returned object into import_state',
   '- import_state: Restore a storage state — sets cookies browser-wide and applies localStorage for the CURRENT page origin (other origins reported as skipped — storage is per-origin; navigate there and re-import) (requires: tabId, state; optional: clearFirst — clear all cookies first)',
       ].join('\n'),
       inputSchema: {
@@ -445,6 +509,9 @@ export function registerStorageTools(
           sameSite: { type: 'string', enum: ['None', 'Lax', 'Strict'], description: 'SameSite attribute.' },
           expires: { type: 'number', description: 'Expiry as epoch seconds.' },
           url: { type: 'string', description: 'URL for delete_cookies.' },
+          partitionKey: {
+            description: 'CHIPS partition key (set_cookie / delete_cookies / imported state cookies): origin string like "https://site.com" (Playwright sourceOrigin shorthand, hasCrossSiteAncestor=false) or object {topLevelSite, hasCrossSiteAncestor}. Partitioned cookies are set Secure automatically.',
+          },
           origin: { type: 'string', description: 'Origin for clear_data.' },
           types: { type: 'string', description: "Storage types: 'cookies,local_storage,indexeddb,cache_storage' or 'all'." },
           storageType: { type: 'string', enum: ['local', 'session'], description: "Web storage area for get_storage/set_storage/delete_storage. 'local' (default) = localStorage, 'session' = sessionStorage." },
