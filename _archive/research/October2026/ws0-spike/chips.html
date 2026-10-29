@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>WS7 CHIPS top — cross-site iframe embed</title></head>
+<body>
+<pre id="top">top page booting…</pre>
+<script>
+// Top-level = localhost:8877; embedded iframe = 127.0.0.1:8877 —
+// localhost and 127.0.0.1 are DISTINCT SITES for cookie partitioning
+// purposes, so the iframe below is a genuine third-party context.
+const el = document.getElementById('top');
+const log = (s) => { el.textContent = s; window.__CHIPS_TOP = s; };
+const from = new URLSearchParams(location.search).get('iframeHost') || '127.0.0.1:8877';
+window.addEventListener('message', (ev) => {
+  if (ev.data && ev.data.chips) log('iframe reports → ' + ev.data.chips + '\n[top cookie view: "' + document.cookie + '"]');
+});
+const f = document.createElement('iframe');
+f.src = 'http://' + from + '/chips-iframe.html';
+f.width = 640; f.height = 120;
+document.body.appendChild(f);
+log('iframe embedded from cross-site ' + from + ' — waiting for its attempt report…');
+</script>
+</body>
+</html>

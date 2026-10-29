@@ -1,0 +1,45 @@
+{
+  "probes": [
+    {
+      "name": "B1 categories=devtools.timeline",
+      "verdict": "no interesting events",
+      "evidence": "{\"label\":\"devtools.timeline only\",\"startOk\":true,\"complete\":{\"dataLossOccurred\":false},\"totalEvents\":279,\"interestingUnique\":0,\"byName\":{},\"chunks\":1,\"chunkSizes\":[279],\"totalBytes\":63391,\"samples\":[],\"userData\":{\"ok\":true,\"result\":{}}}"
+    },
+    {
+      "name": "B2 categories=+devtools.timeline.frame",
+      "verdict": "no gain",
+      "evidence": "{}"
+    },
+    {
+      "name": "B3 categories=+v8 (profile budget)",
+      "verdict": "totalEvents=2150 bytes≈445955",
+      "evidence": "interesting={\"firstMeaningfulPaintCandidate\":1,\"firstContentfulPaint\":1,\"firstPaint\":1,\"largestContentfulPaint::Candidate\":1,\"firstMeaningfulPaint\":2,\"EventTiming\":32}"
+    },
+    {
+      "name": "B4 recordAsMuchAsPossible + navigation survival",
+      "verdict": "started complete=yes dataLoss=false interesting={\"largestContentfulPaint::Candidate\":1}",
+      "evidence": "totalEvents=2151 chunks=15"
+    },
+    {
+      "name": "B4b tracingComplete params shape",
+      "verdict": "recorded",
+      "evidence": "{\"dataLossOccurred\":false}"
+    },
+    {
+      "name": "B4c LayoutShift sample (hadRecentInput field?)",
+      "verdict": "absent",
+      "evidence": "-"
+    },
+    {
+      "name": "B4d LCP candidate sample",
+      "verdict": "captured",
+      "evidence": "{\"args\":{\"data\":{\"candidateIndex\":1,\"isMainFrame\":true,\"isOutermostMainFrame\":true,\"navigationId\":\"1FCE28F375A5B359CFCBE92EE99C5DB1\",\"nodeId\":21,\"nodeName\":\"H1 id='lcp'\",\"performanceTimelineNavigationId\":8655,\"size\":49619,\"type\":\"text\"},\"frame\":\"2689B9D827B7AD94062BFC839C3C489D\"},\"cat\":\"loading,rail"
+    },
+    {
+      "name": "B4e long-task sample",
+      "verdict": "absent",
+      "evidence": "-"
+    }
+  ],
+  "startedAt": "2026-10-29T14:21:15.653Z"
+}

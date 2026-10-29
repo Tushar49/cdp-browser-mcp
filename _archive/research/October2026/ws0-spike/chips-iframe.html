@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>WS7 CHIPS iframe (third-party context)</title></head>
+<body>
+<pre id="chips">iframe booting…</pre>
+<script>
+// Runs as the THIRD-PARTY document (served on 127.0.0.1, embedded by a
+// localhost top level). Attempts the full set of cookie-write shapes and
+// reports RESULTS (per-attempt cookieException/Errors) back to the top page
+// via postMessage; window.__CHIPS_IFRAME holds the canonical copy.
+const el = document.getElementById('chips');
+const log = (s) => {
+  el.textContent = s;
+  window.__CHIPS_IFRAME = s;
+  try { parent.postMessage({ chips: s }, '*'); } catch (e) {}
+};
+const attempts = [];
+const attempt = (name, cookieStr) => {
+  try {
+    document.cookie = cookieStr;
+    // read-back only sees cookies visible in THIS partitioned context
+    const visible = document.cookie.includes(name.split('=')[0]);
+    attempts.push({ name, ok: true, visibleInContext: visible });
+  } catch (e) {
+    attempts.push({ name, error: String(e && e.message || e) });
+  }
+};
+// CHIPS canonical form: Partitioned attribute; Secure is spec-required for
+// Partitioned cookies from non-trustworthy contexts but localhost-adjacent
+// origins are trustworthy yet served over http — record what reality says.
+attempt('partitioned-secure',   'chips_probe=1; Path=/; Secure; Partitioned');
+attempt('partitioned-nosecure', 'chips_probe=2; Path=/; Partitioned');
+attempt('plain-third-party',    'chips_plain=3; Path=/'); // expected: rejected under 3P-cookie deprecation
+log('attempts=' + JSON.stringify(attempts));
+</script>
+</body>
+</html>

@@ -42,6 +42,78 @@ close-out; WebAuthn rigs assert-only forever (Bitwarden law).
 
 ## WS7 — WS0-style canaries, three batches (0.25–0.5, GATE for everything)
 
+**RESULT (2026-10-29): LIVE-RECORDED. Batches A (2 connections + 1 CHIPS
+debug) / B (2) / C (1) — evidence scripts + JSON in
+`_archive/research/October2026/ws0-spike/probe-batch-*` + results json.
+Outcomes per claim:**
+
+- **A — ByRule: GO.** `Network.emulateNetworkConditionsByRule` live on
+  Brave 153. Confirmed by BUILD (not JSON): empty body rejects (−32602
+  "mandatory field missing at position 8" → `matchedNetworkConditions`
+  required); `{urlPattern:'', latency, downloadThroughput, uploadThroughput}`
+  accepted → `ruleIds[]` echo; 1200ms-latency rule moved a 11ms fetch to
+  ~1238ms (throttle lands); `Network.requestWillBeSentExtraInfo` carries
+  **`appliedNetworkConditionsId`** = ruleId echo; clear =
+  `matchedNetworkConditions: []` (verified timing restored); **rules
+  survive navigation** (A9) → `emulate reset` MUST clear explicitly;
+  rule applies ACROSS Fetch intercept paused→continued (A5);
+  `setBlockedURLs` coexistence inconclusive binary in batch A — WS8 gate
+  must prove a blocked request while a rule is active (not a blocker:
+  separate mechanisms).
+- **A — overrideNetworkState: GO.** `offline:true` flipped
+  navigator.onLine live; reset-by-default-values works. Tool-level
+  clear semantics = the same call with neutral values.
+- **A — Browser.addMockCamera: KILL (ghost #2).** `-32601` on Brave 153.
+  No camera rider in 5.3.5; design preserved for 5.5 carcass
+  (condition: Chromium ≥ the version that ships the method).
+- **A — CHIPS: GO (re-shaped gate).** Page-JS writes of 3P cookies ALL
+  dropped by Brave shield (partitioned-secure, partitioned,
+  plain — three shapes recorded, `document.cookie` silently no-ops) —
+  standing Brave caveat in tool docs. CDP path WORKS: `Network.setCookie`
+  + `partitionKey` REQUIRES `secure: true` (else "Sanitizing cookie
+  failed") and `hasCrossSiteAncestor` is MANDATORY on this build;
+  accepted with `topLevelSite: 'http://localhost'` (site form, no
+  trailing slash); `Storage.getCookies` returns the full partitionKey
+  object back; `Network.deleteCookies` takes the partitionKey param.
+  WS9's live gate is now: CDP-set partitioned cookie → `get_cookies`
+  shows it with its partitionKey → export → clear → import → identical
+  partitionKey object equality. (Non-blocking sub-check repeatable at
+  WS9 gate: setCookie via CDP with mismatching topLevelSite behavior.)
+- **B — Tracing: THEY LIVE (expectations reshaped).**
+  `recordMode: recordAsMuchAsPossible` REQUIRED — `recordUntilFull`
+  truncated at ~63KB and lost the render-driven events (B1). Winning
+  category set is a SINGLE string `'loading'` (B2-3: captures
+  `largestContentfulPaint::Candidate` WITH args.data (nodeName, size,
+  candidateIndex, isMainFrame, navigationId) AND `LayoutShift` WITH
+  `had_recent_input:false`, `cumulative_score`, impacted node rects;
+  `'devtools.timeline,devtools.timeline.frame'` captured only LCP — NOT
+  CLS); combined `['devtools.timeline','loading']` also works (B2-4).
+  `tracingComplete` = `{dataLossOccurred}` only; chunk pacing small
+  (13–15 chunks/trace); EventTiming (×32) surfaced ONLY with `'v8'`
+  included (B3) — interaction-delay class needs a WS10-stage probe on
+  the shipping category set; LongTask/RunTask ABSENT in every category
+  combination probed = bound risk: WS10 ships LCP/CLS first-class,
+  long-task class flagged limited-GO pending its WS10 probe (possible:
+  requires `v8` or `devtools.timeline` + JS sampling categories).
+  Thread-write re-check also owed: real navigation trace (B4) stayed
+  dataLoss-free.
+- **C — HeapProfiler: GO.** `takeHeapSnapshot` streamed 13 chunks /
+  12.63MB in 540ms for the rig; `reportHeapSnapshotProgress` events with
+  final `{done, total, finished:true}`; `addHeapSnapshotChunk` head is
+  the `.heapsnapshot` JSON meta header (node_fields incl
+  `detachedness` — newer format than classic wikis); session stayed
+  LIVE after the snapshot (C5, evaluate answered — no stall on this rig
+  size); full snapshot persisted at
+  `batch-c-snapshot.heapsnapshot` for parser development + ground-truth
+  marker present ×3. WS11's committed unit fixture stays synthetic,
+  this is the live-format sanity sample.
+- **C9 regression: PASS-with-note.** Fresh-dist spawn → v5.3.0 up in
+  7ms, ping OK; `Connected:false` is the correct pre-first-browser-tool
+  state; the connect-mode strings check stays the AGENTS.md local-
+  verification checklist (user's live session already exercises it).
+
+**Sequencing constraint discharged — WS8/WS9/WS10/WS11 code may start.
+
 Rig extensions built WITH the canaries: (a) slow-rig page — eager LCP
 candidate + a CLS-generating layout shift (`hadRecentInput:false` path) +
 a 200ms+ long task; (b) rig iframe section — third-party iframe for
@@ -111,9 +183,9 @@ Homes (locked pre-release, momus T1-16): all in `emulate`.
 3. **`emulate reset` grows a ByRule clear step** (emulate.ts:52–57
    today only knows legacy presets-none). The clear transaction from
    Batch A decides shape. A rule surviving reset = gate FAIL.
-4. **`mockCamera: true`** param → `Browser.addMockCamera` (browser-domain,
-   dies with CDP session, cleared by `reset`; geolocation auto-grant at
-   emulate.ts:139–147 is the permission template). Rider — trim-able.
+4. **`mockCamera: true`** param → STRUCK — WS7 KILL: `Browser.addMockCamera`
+   absent on Brave 153 (ghost #2, `-32601`). Nothing ships; design
+   preserved in the 5.5 line below.
 5. **`overrideNetworkState` action** (navigator.onLine/connection spoof,
    carcass spec, ~30 lines) — if Batch A proves it. Rider — trim-able
    FIRST.
@@ -146,9 +218,11 @@ CDP object untouched; import accepts the CDP object AND a Playwright
   present.
 Unit delta ≈ +6 (normalize string form, object form, reject-no-domain
 cookie, export passthrough, round-trip on fake model).
-**Gate (binary, carried verbatim from carcass):** a partitioned cookie
-set by a rig third-party iframe survives export → clear → import with
-IDENTICAL partitionKey (object-equality assertion in gate script).
+**Gate (binary, reshaped at WS7):** a partitioned cookie SET VIA the CDP
+protocol path (`secure: true` + mandatory `hasCrossSiteAncestor` — Brave
+shield silently drops page-JS third-party writes) survives export →
+clear → import with IDENTICAL partitionKey (object-equality assertion in
+gate script).
 
 ### Chores (folded into the 5.3.5 release rows)
 
@@ -188,8 +262,9 @@ IDENTICAL partitionKey (object-equality assertion in gate script).
   get_cookies line + CAVEAT text, Fixed for any in-cycle fixes) →
   release commit → `promote.mjs v5.3.5` → Guard+CI green → tag → npm.
 
-Trim order 5.3.5 (pre-declared): `overrideNetworkState` → `mockCamera` →
-hold (ByRule migration, CHIPS, sweep, chores never trim).
+Trim order 5.3.5 (pre-declared): `overrideNetworkState` → hold (ByRule
+migration, CHIPS, sweep, chores never trim; mockCamera already killed by
+WS7).
 
 ## 5.4.0 — "observability" half (≈2.75–3.25 sessions)
 
@@ -198,8 +273,14 @@ hold (ByRule migration, CHIPS, sweep, chores never trim).
 Home (locked): **`observe`, additive actions `perf_start` / `perf_stop`**
 — NOT a new tool; dodges the 15-tools string/badges' tool-count half of
 the sweep; observe's description already enumerates ops (momus T1-1).
-- `perf_start` = `Tracing.start` with the Batch-B-verified category set,
-  records session-state baseline; returns immediately.
+- `perf_start` = `Tracing.start` with `recordMode:
+  recordAsMuchAsPossible` and WS7's PROVEN category set — the single
+  string `'loading'` (captures LCP candidate + LayoutShift with
+  `had_recent_input` on Brave 153; alone `devtools.timeline…` variants
+  did NOT); records session-state baseline; returns immediately.
+  `EventTiming`/long-task classes = WS10-stage probe (B-cache: EventTiming
+  surfaced only with `'v8'` included; LongTask/RunTask absent in every
+  combination probed) — shipped classes at minimum: LCP, CLS.
 - `perf_stop` = `Tracing.end` + accumulate `dataCollected` chunks in
   `utils/trace-insights.ts` until `tracingComplete`, aggregate, DISCARD
   raw events: last LCP candidate per frame (ms, size, tag hint); CLS
@@ -337,6 +418,11 @@ halves' release rows).
 
 - KB candidates carried: none currently besides rides below.
 - `getStorageItems` — KILLED (superseded; revalidate on concrete ask).
+- `Browser.addMockCamera` — KILLED at WS7 (absent on Brave 153, `-32601`
+  — ghost #2). Design preserved verbatim (WS8 rider row hidden below):
+  emulate-scoped opt-in param, browser-domain call, reset clear,
+  geolocation auto-grant permission template; revalidate when a build
+  ships the method.
 - ByRule {limited-GO remainder} — moved to 5.5 if batch A is partial
   (rule-list editing UX is the plausible remainder, not transport).
 - WS0 outcome (b)-shaped conditional inserts — same conditional-late-

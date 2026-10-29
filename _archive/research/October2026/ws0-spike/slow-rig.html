@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>WS7 slow rig — LCP/CLS/long-task ground truth</title>
+<style>
+  body { font-family: monospace; margin: 16px; }
+  h1 { font-size: 42px; margin: 4px 0; }
+  #shifty { display: inline-block; padding: 24px; background: #dfd; transition: none; }
+  #box { padding: 24px; background: #dde; margin-top: 12px; }
+</style></head>
+<body>
+<pre id="perf">measuring…</pre>
+<h1 id="lcp">WS7 SLOW RIG — eagerly painted LCP candidate</h1>
+<div id="shifty">layout-shift element (moves without input)</div>
+<div id="box">long-task box: tasks run at ~1s and ~2s each ≈250ms</div>
+<script>
+// Self-measures the same metrics the WS10 trace pipeline will extract, so the
+// gate can cross-check trace-derived insight vs page-measured ground truth.
+const t0 = performance.now();
+const state = {
+  lcp: [],            // {ms, size, tag, id}
+  clsTotal: 0, shifts: [], // {ms, from, to}
+  longTasks: [],      // {ms, dur, name}
+};
+const render = () => {
+  const el = document.getElementById('perf');
+  el.textContent = JSON.stringify(state, (k, v) => k === 'nodeTimeOrigin' ? undefined : v, 1);
+  window.__PERF = state;
+};
+try {
+  new PerformanceObserver((list) => {
+    for (const e of list.getEntries()) {
+      if (e.startTime > t0) state.lcp.push({
+        ms: +(e.startTime).toFixed(1), size: e.size, tag: e.element?.tagName || null, id: e.element?.id || null,
+      });
+    }
+    render();
+  }).observe({ type: 'largest-contentful-paint', buffered: true });
+} catch (e) { state.lcpObserverError = String(e); }
+try {
+  new PerformanceObserver((list) => {
+    for (const e of list.getEntries()) {
+      state.clsTotal = +e.value.toFixed(4); // session-with-history: latest cumulative
+      if (e.hadRecentInput) continue;
+      state.shifts.push({ ms: +(e.startTime).toFixed(1), value: +e.value.toFixed(4), nodded: !!e.nodeInfo });
+    }
+    render();
+  }).observe({ type: 'layout-shift', buffered: true });
+} catch (e) { state.clsObserverError = String(e); }
+try {
+  new PerformanceObserver((list) => {
+    for (const e of list.getEntries()) {
+      state.longTasks.push({ ms: +(e.startTime - t0).toFixed(1), dur: +e.duration.toFixed(1), name: e.name });
+    }
+    render();
+  }).observe({ type: 'longtask', buffered: true });
+} catch (e) { state.ltObserverError = String(e); }
+
+const busy = (ms) => {
+  const end = performance.now() + ms;
+  while (performance.now() < end) { /* intentional main-thread block */ }
+};
+
+// Sequence: shift at 800ms (no input anywhere in the page -> hadRecentInput:false),
+// long task #1 at 1000ms (~250ms), long task #2 at 2000ms (~250ms), second small shift at 2600ms.
+setTimeout(() => { const s = document.getElementById('shifty'); s.style.transform = 'translateY(24px)'; }, 800);
+setTimeout(() => { busy(250); }, 1000);
+setTimeout(() => { busy(250); }, 2000);
+setTimeout(() => { const s = document.getElementById('shifty'); s.style.transform = ''; }, 2600);
+window.__BUSY = busy; // scripts can drive extra tasks on demand
+render();
+</script>
+</body>
+</html>

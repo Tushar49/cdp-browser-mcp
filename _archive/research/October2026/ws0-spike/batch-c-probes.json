@@ -1,0 +1,65 @@
+{
+  "probes": [
+    {
+      "name": "B5 reset __PERF",
+      "verdict": "ok",
+      "evidence": "cleared before trace"
+    },
+    {
+      "name": "B5 cats=loading+devtools.timeline",
+      "verdict": "complete dataLoss=false",
+      "evidence": "totalEvents=619 interesting={} | LS samples: - || LT: -"
+    },
+    {
+      "name": "B5b page-side __PERF ground truth (PerformanceObserver)",
+      "verdict": "captured",
+      "evidence": "undefined"
+    },
+    {
+      "name": "C0 ground-truth seeded",
+      "verdict": "ready",
+      "evidence": "{\"count\":1234,\"kw\":\"WS7GroundTruthObj\"}"
+    },
+    {
+      "name": "C1 HeapProfiler.enable",
+      "verdict": "OK",
+      "evidence": "enabled"
+    },
+    {
+      "name": "C2 takeHeapSnapshot",
+      "verdict": "OK",
+      "evidence": "wall=540ms chunks=13 totalMB=12.63 progressEvents=13 lastProgress={\"done\":94060,\"total\":94060,\"finished\":true} lastSeenObjectIdEvents=0"
+    },
+    {
+      "name": "C3 chunk stream shape",
+      "verdict": "captured",
+      "evidence": "firstChunkHead={\"snapshot\":{\"meta\":{\"node_fields\":[\"type\",\"name\",\"id\",\"self_size\",\"edge_count\",\"detachedness\"],\"node_types\":[[\"hidden\",\"array\",\"string\",\"object\",\"code\",\"closure\",\"regexp\",\"number\""
+    },
+    {
+      "name": "C4 snapshot tail (meta?)",
+      "verdict": "captured",
+      "evidence": "tail=erImpl *, const base::TickClock *, base::TimeTicks)@..\\\\..\\\\third_party\\\\blink\\\\renderer\\\\platform\\\\scheduler\\\\main_thread\\\\main_thread_scheduler_impl.cc:570\"]}"
+    },
+    {
+      "name": "C5 post-snapshot session liveness",
+      "verdict": "LIVE (evaluate answered)",
+      "evidence": "4"
+    },
+    {
+      "name": "C6 browser-level during-after? (post) ",
+      "verdict": "reject",
+      "evidence": "Runtime.getVersion → {\"code\":-32601,\"message\":\"'Runtime.getVersion' wasn't found\"}"
+    },
+    {
+      "name": "C7 snapshot persisted for offline parse test",
+      "verdict": "13239995 bytes",
+      "evidence": "A:/Projects/Browser/mcp-servers/cdp-browser-mcp/_archive/research/October2026/ws0-spike/batch-c-snapshot.heapsnapshot"
+    },
+    {
+      "name": "C8 ground-truth marker occurrences in snapshot text",
+      "verdict": "PRESENT",
+      "evidence": "occurrences=3"
+    }
+  ],
+  "startedAt": "2026-10-29T16:13:53.238Z"
+}

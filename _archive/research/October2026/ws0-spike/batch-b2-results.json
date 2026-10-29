@@ -1,0 +1,30 @@
+{
+  "probes": [
+    {
+      "name": "B2-0 bringToFront (paint required for LCP/CLS)",
+      "verdict": "OK",
+      "evidence": "battery tab foreground"
+    },
+    {
+      "name": "B2-1 rig boot check: page-side observers recorded",
+      "verdict": "NO — rig page broken?",
+      "evidence": "undefined"
+    },
+    {
+      "name": "B2-2 cats [devtools.timeline,devtools.timeline.frame]",
+      "verdict": "{}",
+      "evidence": "total=1 ls=- lcp=- lt=- complete={\"dataLoss\":false} bytes=101"
+    },
+    {
+      "name": "B2-3 cats [loading]",
+      "verdict": "{\"firstMeaningfulPaintCandidate\":1,\"firstContentfulPaint\":1,\"firstPaint\":1,\"largestContentfulPaint::Candidate\":1,\"firstM",
+      "evidence": "total=245 ls={\"args\":{\"data\":{\"cumulative_score\":0.02161271417660483,\"frame_max_distance\":133,\"had_recent_input\":false,\"impacted_nodes\":[{\"new_rect\":[20,443,1880,79],\"node_id\":18,\"old_rect\":[20,310,1880,79]},{\"new lcp={\"args\":{\"data\":{\"candidateIndex\":1,\"isMainFrame\":true,\"isOutermostMainFrame\":true,\"navigationId\":\"6263528FF9C9E1CB6D843EA8B02DD761\",\"nodeId\":16,\"nodeName\":\"H1 id='lcp'\",\"performanceTimelineNavigation lt=- complete={\"dataLoss\":false}"
+    },
+    {
+      "name": "B2-4 cats [devtools.timeline, loading]",
+      "verdict": "{\"firstMeaningfulPaintCandidate\":1,\"firstContentfulPaint\":1,\"firstPaint\":1,\"largestContentfulPaint::Candidate\":1,\"firstM",
+      "evidence": "total=950 ls={\"args\":{\"data\":{\"cumulative_score\":0,\"frame_max_distance\":133,\"had_recent_input\":true,\"impacted_nodes\":[{\"new_rect\":[20,443,1880,79],\"node_id\":25,\"old_rect\":[20,310,1880,79]},{\"new_rect\":[20,283,1880 lcp={\"args\":{\"data\":{\"candidateIndex\":1,\"isMainFrame\":true,\"isOutermostMainFrame\":true,\"navigationId\":\"99B1B6FC767083665576D2490A3C9BE2\",\"nodeId\":23,\"nodeName\":\"H1 id='lcp'\",\"performanceTimelineNavigation lt=- complete={\"dataLoss\":false}"
+    }
+  ],
+  "startedAt": "2026-10-29T16:16:37.703Z"
+}

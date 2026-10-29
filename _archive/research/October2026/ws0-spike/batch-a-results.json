@@ -1,0 +1,100 @@
+{
+  "probes": [
+    {
+      "name": "A1 emulateNetworkConditionsByRule (empty body)",
+      "verdict": "reject=\"Network.emulateNetworkConditionsByRule → {\\\"code\\\":-32602,\\\"message\\\":\\\"Invalid parameters\\\",\\\"data\\\":\\\"Failed to deserialize params.matchedNetworkConditions - BINDINGS: mandatory field missing at position 8\\\"}\"",
+      "evidence": "\"Network.emulateNetworkConditionsByRule → {\\\"code\\\":-32602,\\\"message\\\":\\\"Invalid parameters\\\",\\\"data\\\":\\\"Failed to deserialize params.matchedNetworkConditions - BINDINGS: mandatory field missing at position 8\\\"}\""
+    },
+    {
+      "name": "A1b match-all no-op rule → ruleIds",
+      "verdict": "OK",
+      "evidence": "{\"ruleIds\":[\"B60DB127DCF201ECB4254C126B252CE5\"]}"
+    },
+    {
+      "name": "A2 rule throttle 1200ms latency",
+      "verdict": "THROTTLE APPLIES",
+      "evidence": "baseline=[27,21] throttled=[1235,1237] ruleId=51095F35B48FBE385F8FBC717A1CD7F7 extraInfoEcho=[{\"id\":\"51095F35B48FBE385F8FBC717A1CD7F7\"},{\"id\":\"51095F35B48FBE385F8FBC717A1CD7F7\"}]"
+    },
+    {
+      "name": "A3 clear via matchedNetworkConditions:[]",
+      "verdict": "CLEARS",
+      "evidence": "clear=true post=[17,17] baseline=[27,21]"
+    },
+    {
+      "name": "A4 ByRule + setBlockedURLs coexistence",
+      "verdict": "record for review",
+      "evidence": "failed=[] ruledEchoCount=1 reThrottle=[\"3AD547098DF4D35BE323F275B9AD5130\"]"
+    },
+    {
+      "name": "A5 ByRule + Fetch intercept",
+      "verdict": "RULE APPLIES ACROSS INTERCEPT",
+      "evidence": "pausedUrl=http://localhost:8877/slow-rig.html?fetchprobe=1 fetch=ok:1089 echo=[\"3AD547098DF4D35BE323F275B9AD5130\"]"
+    },
+    {
+      "name": "A6 overrideNetworkState(navigator spoof)",
+      "verdict": "OK",
+      "evidence": "before=true|none after=false|none state=applied"
+    },
+    {
+      "name": "A6b overrideNetworkState reset-by-default-values",
+      "verdict": "OK",
+      "evidence": "online reset=true"
+    },
+    {
+      "name": "A7 Browser.addMockCamera",
+      "verdict": "reject",
+      "evidence": "\"Browser.addMockCamera → {\\\"code\\\":-32601,\\\"message\\\":\\\"'Browser.addMockCamera' wasn't found\\\"}\""
+    },
+    {
+      "name": "A7b camera removal methods",
+      "verdict": "NONE FOUND — removal = session disconnect only",
+      "evidence": "probed 3 plausible names; job says die with session"
+    },
+    {
+      "name": "A7c enumerateDevices (labels)",
+      "verdict": "no videoinput | raw={}",
+      "evidence": "[object Object]"
+    },
+    {
+      "name": "A7d camera permission state on localhost",
+      "verdict": "observed (getUserMedia NOT triggered)",
+      "evidence": "[object Object]"
+    },
+    {
+      "name": "A8 chips.html iframe report",
+      "verdict": "MISSING",
+      "evidence": "MISSING"
+    },
+    {
+      "name": "A8b Storage.getCookies (partitionKey field present)",
+      "verdict": "none/Error",
+      "evidence": "[]"
+    },
+    {
+      "name": "A8c Network.getCookies urls-filter version",
+      "verdict": "OK (else Storage path wins)",
+      "evidence": "[]"
+    },
+    {
+      "name": "A8d Network.setCookie with protocol partitionKey",
+      "verdict": "rejected",
+      "evidence": "\"Network.setCookie → {\\\"code\\\":-32602,\\\"message\\\":\\\"Sanitizing cookie failed\\\"}\""
+    },
+    {
+      "name": "A8e partitionKey mismatch top-site accept/reject",
+      "verdict": "error recorded",
+      "evidence": "Network.setCookie → {\"code\":-32602,\"message\":\"Sanitizing cookie failed\"}"
+    },
+    {
+      "name": "A8f Network.deleteCookies basic shape",
+      "verdict": "OK",
+      "evidence": "clean"
+    },
+    {
+      "name": "A9 rule survival across navigation",
+      "verdict": "SURVIVES",
+      "evidence": "nav=ok timing=[1016]"
+    }
+  ],
+  "startedAt": "2026-10-29T14:16:15.574Z"
+}
