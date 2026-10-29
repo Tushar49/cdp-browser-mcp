@@ -77,6 +77,13 @@ export interface ServerConfig {
    * = unrestricted — today's behavior.
    */
   allowedOrigins: string[];
+
+  /**
+   * Opt-in allow-list for extension toolbar-button triggers (5.3 WS6) —
+   * exact extension IDs from CDP_EXTENSION_TRIGGER_ALLOWLIST. Empty by
+   * default: trigger fails with a remedy, listing always works.
+   */
+  extensionTriggerAllowlist: string[];
 }
 
 // ─── MCP Tool Result ────────────────────────────────────────────────

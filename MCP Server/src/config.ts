@@ -55,5 +55,15 @@ export function loadConfig(): ServerConfig {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+
+    /**
+     * Opt-in allow-list for extension toolbar-button triggers (5.3 WS6).
+     * Exact extension IDs, comma-separated. Empty (default) = trigger
+     * always fails with a "not allow-listed" remedy; listing always works.
+     */
+    extensionTriggerAllowlist: (process.env.CDP_EXTENSION_TRIGGER_ALLOWLIST || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }

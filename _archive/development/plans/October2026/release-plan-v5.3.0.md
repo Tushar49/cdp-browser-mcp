@@ -268,6 +268,28 @@ gained `includeActionableInformation?` on 2026-10-26.
 
 ## WS6 — extensions subset (promoted into 5.3 per maintainer; ~0.5 session)
 
+## WS6 — extensions subset (promoted into 5.3 per maintainer; ~0.5 session)
+
+**WS6 CLOSE-OUT (2026-10-29, shipped + live-verified PASS):**
+`browser extensions` (listing; empty = expected stock outcome) +
+`browser trigger_extension` (opt-in allow-list guardrails as specced;
+id never inferred; UNTRUSTED labeling; "no wildcard/first/iterate"
+unit-locked). Live gate on Brave 153 with the maintainer-loaded
+`WS6 Test Extension` (id kdobafodeeolkgnfehbeppdlmbkbkgpm +
+incidental uBlock unpacked copy discovery): listing PASS, guardrail
+PASS, trigger PASS. **Live-caught Chromium semantics:** triggerAction
+refuses page-type targets ("Action can only be triggered on a tab
+target") — tab-type targets exist per tab (same URL, different id),
+are hidden from default Target.getTargets, have NO parentId link →
+resolved by unique-URL match (+brief poll for fresh tabs); the
+default filter's catch-all keeps PAGE-type twins in the result, which
+must be excluded from candidates (the bug behind two failed gate
+runs, unit-locked). Stretch (getStorageItems) untouched → noted as a
+5.3 defer to the carcass. NOT shipped (per plan): loadUnpacked/
+uninstall. Batteries: `_archive/research/October2026/ws0-spike/
+live-ws6.mjs` + `probe-tabtargets.mjs`.
+Kill criterion unused — domain answers and listing works.
+
 Capability-gated (the `Extensions` canary answers on Brave 153).
 **Protocol-verified precision: `getExtensions()` lists UNPACKED
 extensions ONLY** (description is explicit) — so the live test needs a
