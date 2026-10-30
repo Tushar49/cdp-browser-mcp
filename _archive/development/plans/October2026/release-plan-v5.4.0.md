@@ -308,26 +308,44 @@ WS7).
 
 ### WS10 — perf insights flagship (1–1.5)
 
+**STEP ZERO — standalone class probe (live, before ANY WS10 code).** One
+canary script (1 CDP connection, 1 Allow dialog; template:
+`probe-batch-b2-tracing.mjs`) decides everything below; its outcome gets a
+RESULT block here, in the WS7 pattern, before `trace-insights.ts` exists
+(the "no code before batch outcome is recorded" rule extends to it):
+1. **Surviving classes**: probe `'v8'` overlay (+ `devtools.timeline` +
+   JS-sampling variants) on top of `'loading'` for LongTask/RunTask and
+   EventTiming. **Binary GO/KILL per class — never half-insights.**
+   B-cache: EventTiming only surfaced with `'v8'`; LongTask/RunTask
+   absent in every combination probed.
+2. **Event volume under `'v8'`**: high-frequency code/IC/GC events. If
+   `'v8'` survives, `perf_stop` MUST aggregate incrementally per-chunk
+   (cap applies to per-class raw storage, not parse input) — a
+   parse-once-at-end design truncates away LCP/CLS behind 50k v8 noise
+   events before they are ever seen. Pristine `'loading'`-only outcome →
+   parse-once stays (13–15 small chunks proven at WS7).
+3. Piggyback: confirm `detachedness`-era format from a live trace
+   session (feeds WS11's parser).
+
 Home (locked): **`observe`, additive actions `perf_start` / `perf_stop`**
 — NOT a new tool; dodges the 15-tools string/badges' tool-count half of
 the sweep; observe's description already enumerates ops (momus T1-1).
 - `perf_start` = `Tracing.start` with `recordMode:
-  recordAsMuchAsPossible` and WS7's PROVEN category set — the single
-  string `'loading'` (captures LCP candidate + LayoutShift with
+  recordAsMuchAsPossible` and the probe-PROVEN category set (pristine
+  `'loading'` captures LCP candidate + LayoutShift with
   `had_recent_input` on Brave 153; alone `devtools.timeline…` variants
-  did NOT); records session-state baseline; returns immediately.
-  `EventTiming`/long-task classes = WS10-stage probe (B-cache: EventTiming
-  surfaced only with `'v8'` included; LongTask/RunTask absent in every
-  combination probed) — shipped classes at minimum: LCP, CLS.
-- `perf_stop` = `Tracing.end` + accumulate `dataCollected` chunks in
-  `utils/trace-insights.ts` until `tracingComplete`, aggregate, DISCARD
-  raw events: last LCP candidate per frame (ms, size, tag hint); CLS
-  (sum minus `hadRecentInput`, count, worst single); long tasks
-  (count/total/worst-3 + attributable script); interaction delay max +
-  count (INP-ish).
-- Output token-capped: header (url, duration, dataLoss flag) + ≤ ~40
-  lines; event-accumulation hard cap (~50k events) → degrades to a noted
-  truncation, never OOM; no background timers.
+  did NOT). Shipping any category set NOT proven live at gate time is
+  prohibited. Records session-state baseline; returns immediately.
+- `perf_stop` = `Tracing.end` + accumulate `dataCollected` chunks until
+  `tracingComplete`, aggregate (architecture per probe outcome above),
+  DISCARD raw events. Insight classes exact per probe RESULT:
+  LCP (last candidate per frame: ms, size, tag hint); CLS (sum minus
+  `hadRecentInput`, count, worst single); long tasks / interaction
+  delay / slow-block classes ONLY if the probe GOes them.
+- Output token-capped: header (url, duration, **dataLossOccurred —
+  present even when insights extracted fine**; B4 honesty signal) +
+  ≤ ~40 lines; event-accumulation hard cap (~50k events) → degrades to
+  a noted truncation, never OOM; no background timers.
 - Optional raw-trace dump via the `TempFileManager` stream pattern
   (discoverable by `clean_temp`). Stretch — first in the 5.4.0 trim
   order after `heap_diff`.
@@ -338,11 +356,52 @@ the sweep; observe's description already enumerates ops (momus T1-1).
   extraction exceeds budget, cut long-task attributions first, never
   ship raw-dump-only.
 
-Unit delta ≈ +8 on synthetic `dataCollected` fixtures (no live deps):
-happy path, cap, data-loss flag, stop-without-start error.
-**Gate (binary):** rig recorded under a 5.3.5 ByRule `slow3g` rule (the
-ByRule-first payoff) → `perf_stop` emits ≥1 insight in each class
-{LCP, CLS, slow-block} on the named slow-rig page; unit fixtures green.
+**State contracts (first stateful/long-lived actions in `observe`; all
+pull-based today):**
+- Event subscriptions (`dataCollected` / `tracingComplete`) live in the
+  runtime event pipeline (`index.ts`, the `consoleLogs`/`networkReqs`
+  slot), keyed per session — `index.ts` edits are named, not surprises.
+  Chunks append SYNCHRONOUSLY in the dispatch path (same invariant WS11
+  needs); async hops are the only real reorder risk.
+- Re-attach (renderer process swap) → trace CONTINUES (5.2 precedent +
+  WS7 B4 dataLoss-free navigation); full WS disconnect → `perf_stop`
+  maps `Tracing.end` failure to actionably "recording lost — session
+  ended; restart recording", prunes the entry, never hangs.
+- Double `perf_start` → fail-with-state ("recording already in progress,
+  started at <ts>"). Two tabs recording concurrently is safe (per-target
+  sessions) — say so in the description text.
+- Session-expiry hook best-effort `Tracing.end` + discard: abandoned
+  in-flight traces leak browser memory (`recordAsMuchAsPossible` is
+  unbounded on the USER's browser) — this is server-owned subscription
+  cleanup, not tab lifecycle.
+- **Scrubber decision (FIXED): default scrub stays; NO `_noScrub`**
+  opt-out for `perf_stop` output — trace insights are untrusted page
+  data (webmcp UNTRUSTED precedent); the `list_credentials`
+  identifier-not-secret carve-out does NOT apply; scrubber over-reach
+  (`keyword`→`***`) accepted cost per O2. Pinned by a matrix test: a
+  fixture URL containing `token=X` MUST come out masked.
+  (`heap_dump` writes bypass the scrubber — disk lane, covered by its
+  opt-in description.)
+
+Unit delta ≈ +9–10 on synthetic `dataCollected` fixtures (no live
+deps): happy path, cap, data-loss flag, stop-without-start error,
+last-LCP-per-frame dedup, CLS `hadRecentInput` exclusion, worst-3
+attribution selection, malformed-chunk tolerance, double-start
+fail-with-state, session-death actionable failure.
+**Gate-script inventory (momus T1-2): `live-ws10.mjs` and
+`live-ws11.mjs` DO NOT exist — to be written, home
+`_archive/research/October2026/ws0-spike/` (siblings of live-ws8/9.mjs;
+mirror their absolute file:/// SDK-import pattern — tried-and-proven).
+Probe template = the
+existing `probe-batch-b*.mjs`; WS10's standalone probe output JSON
+joins the `batch-*-results.json` set.**
+**Gate (binary):** rig recorded under a live 5.3.5 `slow3g` ByRule rule
+set via the SHIPPED `emulate` tool surface (not raw CDP — ByRule-first
+payoff + WS8 regression check double-duty) → `perf_stop` emits ≥1
+insight in every SURVIVING class on the named slow-rig page; unit
+fixtures green. Assert PRESENCE, not equality (throttle inflates
+LCP); the optional tight cross-check (rig `window.__PERF` vs trace)
+runs unthrottled. Killed classes never appear in the gate.
 
 ### WS11 — heap dump + offline summary (1)
 
@@ -354,42 +413,114 @@ Homes (locked): **`observe`** — additive actions `heap_dump`,
   description states the temp-file location + lifecycle; files obey
   cleanup law: `clean_temp` removes them, nothing auto-deletes user
   disk state; no auto-dump ever).
+  **Streaming contract (momus T1 contract #2 — MANDATORY test):**
+  chunks append synchronously in the event-dispatch path in arrival
+  order; unit fixture drives synthetic chunks through the pipeline and
+  asserts the final file is byte-equal to the ordered concatenation, plus
+  one gap-then-complete case; a mid-stream abort (session error / tab
+  close before `{finished:true}`) leaves the partial file marked
+  `.partial` and never advertised as complete; result errors actionably.
+  **TempFileManager gains an fd-append (open once, never per-chunk
+  `writeFileSync` — O(file)){ + hard size cap ~500MB that aborts with an
+  actionable note rather than filling the user's disk. This append lands
+  in WS11 regardless of trims — heap core, not trim-able.**
+  (WS10's optional raw-trace dump reuses the same append primitive.)
 - `heap_summary` (offline, pure-node): parse `.heapsnapshot`
-  (JSON header + strings/nodes/edges tables) — rollup + top-N by
-  retained/self size; streaming/incremental parse so a 100MB+ snapshot
-  never materializes in RAM; one ~50MB generated fixture proves it.
-- `heap_diff` = stretch (trim-first — least-asked-for; ~cheap ON TOP of
-  summaries once they exist).
+  (JSON header + strings/nodes/edges parallel tables — one flat array
+  each; nodes/edges resolved by cumulative edge_count offset arithmetic;
+  **column indices resolved from `node_fields` NAMES, never hard-coded**
+  — Batch C confirms the detachedness-era 6-field format; classic wiki
+  offsets are wrong). **Retained-size semantics decided: SELF-size top-N
+  + bounded-depth GC-root BFS path hints. NO dominator tree — true
+  retained size without Lengauer-Tarjan is fake; the word "retained" is
+  not shipped unless dominators ship.** Bonus: `detachedness` surfaces
+  detached-context leaks (rhymes with `observe.memory` counters).
+  Streaming/incremental parse (incremental typed-array conversion,
+  ~150 hand-rolled lines, zero deps) so a 100MB+ snapshot never
+  materializes in RAM.
+- **Streaming cut rule (WS10's mid-stream analogue):** if the parser
+  overruns budget, cut summary columns (retained-hint depth first,
+  ranking last) — never ship a non-streaming parse; the ~50MB generated
+  fixture is the over-budget canary.
+- `heap_diff` = stretch (trim-first — least-asked-for). Identity by
+  (constructor-name, self-size bucket), NEVER node ids (they differ
+  across dumps); name-level deltas only.
+- **Fixture policy:** the ~50MB fixture is GENERATED at test time from a
+  seeded committed script — no 50MB artifact ever committed; NO unit test
+  references `_archive/…` paths (stripped at promote; guard-main
+  backstop). `batch-c-snapshot.heapsnapshot` (13.24MB) stays the
+  dev-time format sanity sample only.
+
 Unit delta ≈ +6 (synthetic `.heapsnapshot` fixture: parser rollup,
-top-N, streaming fixture).
+top-N, streaming fixture, chunk append-discipline, .partial handling).
 **Gate (binary):** committed synthetic fixture parses offline (unit);
 live: dump the rig → offline summary states the known object count of a
-distinctive test constructor with the exact count recorded from the rig
-at dump time (ground-truth cross-check, no browser in the unit path).
+distinctive test constructor — evaluated via `Runtime.evaluate`
+IMMEDIATELY before `takeHeapSnapshot` in the same script, with the rig
+batch-creating the objects so the count is stable (ground-truth
+cross-check, no browser in the unit path).
 
 ### WS12 — slack / catch-up (0.25)
 
-`overrideNetworkState` if it was trimmed from 5.3.5 and Batch A had
-proven it; any in-cycle fixes; slim-mode schema budget re-check
-(5.2's slim-output tests are the canary).
+`overrideNetworkState` shipped in 5.3.5 — the old catch-up is void.
+Priority use: **exactly ONE bounded retry for a class the probe KILLED**
+(e.g. EventTiming with the incremental aggregator) — GO or re-KILL into
+the 5.5 carcass with a verb; never a third attempt. Second candidate:
+trace-output file dump ONLY if WS10's raw-dump stretch was trimmed AND
+the probe survived — within-cycle catch-ups only (two-lane law);
+trim-order cuts are final for the cycle. Otherwise: buffer, plus
+slim-mode schema budget re-check (5.2's slim-output tests as canary;
+SSOT: new observe actions stay OUT of the 6-slim schema — slim remains
+subset-of-daily-use; degrade with an error naming full mode if invoked).
 
-- **5.4.0 count sweep (full mode)** (momus T1-1, named touch points):
-  README top badges (tool count likely STAYS 15 — verify `observe` did
-  not grow a tool; sub-action count moves: ≥ +4 → recompute), README
-  tools table + observe/emulate rows + per-action descriptions (rule 4),
-  `index.ts` instruction string (:689 area — recompute the action listing
-  even though the tool list is unchanged),
-  `types.ts` roster line, AGENTS.md Structure line. Counts derived from
-  `registry.ts` wiring, cross-checked against a SECOND source (the live
-  `tools/list` output or a dispatch-allowlist test) and recorded in the
-  release commit body. Sweep surface names BOTH README.md files (root +
+- **5.4.0 count sweep (full mode)** — expected-value table (momus T1-1,
+  values pre-computed from disk; re-derive at sweep time):
+  | Touch point | Before | After expected |
+  |---|---|---|
+  | `observe.ts` action enum | 7 (console, network, request, performance, memory, downloads, har) | **11** (+ perf_start, perf_stop, heap_dump, heap_summary) |
+  | observe "Operations:" description block | 7 bullets | 11 bullets (shipped doc surface — rule 4) |
+  | Tool count | 15 | **15 unchanged** (`index.ts:689` name list + `:667` "all 15" — verify no-op) |
+  | Sub-action badge "130+" | 130+ | re-derive from `registry.ts` total (+4); both README badges move |
+  | observe dispatch-fail string (`observe.ts:486` area) | 7-action enumeration | 11-action enumeration — **sweep second source** alongside live `tools/list` + a dispatch-allowlist test |
+  | `types.ts:70` roster line | unchanged | expected no-op (verify) |
+  | AGENTS.md "15 tools / 130+ actions" | — | sub-action half moves (AGENTS.md is identical-on-main-and-dev — this edit rides the release commit, NOT dev-only) |
+  | README tools table | observe 7 rows | observe 11 rows + terse per-action descriptions (rule 4) |
+
+  ⚠️ Reference fix: `index.ts:689` enumerates TOOL names only — it has
+  NO per-action listing to recompute (the earlier "recompute the action
+  listing inside it" claim was inaccurate). The action-listing surfaces
+  are the enum + Operations block + table row above.
+  Counts derived from `registry.ts` wiring, cross-checked against a
+  SECOND source (the live `tools/list` output of the fresh dist AND/OR
+  the dispatch-allowlist test) and recorded in the release commit body.
+  Sweep surface names BOTH README.md files (root +
   `MCP Server/README.md` — the miss shape of both failed releases).
-- Release mechanics identical to 5.3.5's row with `[5.4.0]` CHANGELOG
-  (Added: perf actions, heap actions; Changed: emulate rows if
-  5.3.5-pending notes).
+- Release mechanics identical to 5.3.5's row. **CHANGELOG: create the
+  undated `[5.4.0]` heading at the FIRST WS10 commit** (5.3.5
+  precedent: dated-release-only blocks, no `[Unreleased]` accumulation);
+  every user-facing change mirrored per WS commit (rules 3+4);
+  `Added`: perf/heap actions + any probe-GOed classes; `Changed`:
+  expected EMPTY (no planned line-shape deltas — if the probe adds no
+  classes, nothing lands there). Sequence: bump `package.json` + the
+  `VERSION` const in `index.ts` together → `[5.4.0]` dated → release
+  commit carries the sweep + second-source cross-check → clean-tree
+  check → `promote.mjs v5.4.0` → hard-verify strip (watch the NEW
+  `live-ws10/11.mjs` + probe/gate JSONs under `_archive` — the v5.1.0
+  two-file leak shape) → Guard+CI green → tag → GitHub Release → npm
+  (package stays `cdp-mcp-server`, decided 2026-10-29; note the ~60s
+  `npm view` propagation lag — Release run log tgz notice is proof).
 
 Trim order 5.4.0 (pre-declared): `heap_diff` → raw-trace file dump →
-hold (flagship + heap core + sweep never trim; WS12 is the buffer).
+hold. **Hold set (explicit): {`perf_start`/`perf_stop` core,
+`heap_dump`, `heap_summary`, the TempFileManager fd-append (heap core),
+count sweep, WS12's bounded retry} never trim.** Killed probe classes
+exit via GO/KILL before any draft — they trim NOTHING (they get
+§5.5 carcass verbs instead). Flagship + heap core + sweep never trim;
+WS12 is the buffer.
+
+**Dialog budget: 3** (probe script + WS10 gate + WS11 gate, one CDP
+connection each; serve.mjs is plain HTTP; zero on flag mode) — well
+under 5.3.5's canary churn.
 
 ## Sequencing (sequenced ties + gates)
 
@@ -399,17 +530,22 @@ hold (flagship + heap core + sweep never trim; WS12 is the buffer).
 | 2 | WS8 ByRule + riders | 0.5–1 | throttle PASS, fallback TRUE, reset clears | 5.3.5 |
 | 3 | WS9 CHIPS round-trip | 0.25–0.5 | partitioned cookie survives export→import | 5.3.5 |
 | 4 | WS4 rerun + npm decision + 5.3.5 sweep + release | 0.5 | sweep table empty, pipeline green | 5.3.5 |
-| 5 | WS10 perf insights | 1–1.5 | insights ≥3 classes under throttling | 5.4.0 |
-| 6 | WS11 heap dump + summary | 1 | summary matches rig ground truth | 5.4.0 |
-| 7 | WS12 slack/catch-up | 0.25 | live param works | 5.4.0 |
-| 8 | 5.4.0 sweep + release | 0.5 | sweep table empty, pipeline green | 5.4.0 |
+| 5 | WS10 probe (standalone, step zero) | 0.25 | classes GO/KILL + volume + arch recorded here | 5.4.0 |
+| 6 | WS10 perf insights | 1–1.5 | ≥1 insight in every SURVIVING class via live emulate slow3g | 5.4.0 |
+| 7 | WS11 heap dump + summary | 1 | summary matches rig ground truth (count evaluated pre-dump) | 5.4.0 |
+| 8 | WS12 slack/catch-up | 0.25 | bounded-retry GO/re-KILL, else empty | 5.4.0 |
+| 9 | 5.4.0 sweep + release | 0.5 | sweep table empty, pipeline green | 5.4.0 |
 
-Self-audit + buffer (momus T2-10): table total ≈ 4.0–5.25 sessions
-(per-half headers sum to their own rows: 1.25–2.0 + 2.75–3.25).
-Entering test baseline **479 green**; expected deltas ≈ +16 (5.3.5) and
-+14 (5.4.0) → ≈ 509; plus 0.25–0.5 live-fix buffer (4 in-cycle fixes in
-5.2, webmcp round-trip shape in 5.3). Self-audit line required at
-close-out: table sum vs stated totals, per half.
+Self-audit + buffer (momus T2-10): table total ≈ 4.25–5.5 sessions
+(5.3.5 actual ≈ 2.0; 5.4.0 headers sum to their rows, incl. the
+re-located probe). **Entering 5.4.0 baseline = 504 green (re-derive
+with `pnpm test` at WS10 start — don't trust this number); deltas:
++9–10 (WS10, incl. the two state-contract fixtures) +6 (WS11) →
+≈ 519–520.** (5.3.5 actuals: 479 → 504 = +25 vs planned +16.) Plus
+0.25–0.5 live-fix buffer (4 in-cycle fixes in 5.2, webmcp round-trip
+shape in 5.3, scrubber/`_noScrub` in 5.3.5). Self-audit line required
+at close-out: table sum vs stated totals, per half, plus where the
+probe landed session-wise.
 
 Decisions made by the directives in this plan (no further maintainer
 input needed unless flagged below): binning = controls/observability
@@ -432,8 +568,8 @@ call.
 | mockCamera | rig getUserMedia sees fake camera; reset clears | param validation (subset of the 10) |
 | overrideNetworkState | onLine spoof reflects in-rig | validation |
 | CHIPS | partitioned cookie survives export→import identically | +6 normalize/passthrough/round-trip |
-| perf insights | rig under slow3g → 3 insight classes | +8 fixtures |
-| heap dump/summary | dump rig → offline ground-truth count matches | +6 synthetic fixture + streaming |
+| perf insights | rig under live slow3g (via `emulate`) → ≥1 insight per SURVIVING class | +9–10 fixtures (incl. 2 state contracts, token=X scrub matrix) |
+| heap dump/summary | dump rig → offline ground-truth count matches (evaluated pre-dump) | +6 synthetic fixture + append-discipline/.partial + streaming |
 | WS4 rerun | 3 re-assertions on the maintainer's running CDP Brave (Bitwarden stands; caveat re-declaration rule) | existing 5.3 battery unchanged |
 | Regression | flag+toggle connect unchanged; slim mode unaffected; baseline+ΣN green | existing suite |
 
@@ -468,5 +604,21 @@ halves' release rows).
 - npm rename (if declined) — decision record filed, no work item.
 - Heap live-diff browser-side (as opposed to offline) — noted-idea,
   not planned.
+- **Pre-poised 5.4 probe rows — flip state at WS10 close-out, whatever
+  the probe outcome** (momus T1-6):
+  - LongTask/RunTask insight class — CONDITIONAL-KILL: B-cache absent
+    in every `'loading'`-era combo; the WS10 probe decides. If KILL:
+    verb = "revalidate on Brave ships the events" (+ record the probe
+    JSON). If GO: delete this row.
+  - EventTiming/INP interaction-delay class — CONDITIONAL-KILL: only
+    surfaced with `'v8'` (volume risk unproven until the probe). If
+    KILL after the WS12 retry: verb = "one retry spent — revalidate
+    with the incremental aggregator if user data shows demand". If GO
+    at probe or WS12: delete this row.
+  - `heap_diff` (if trimmed) — verb: "implement as a follow-on once two
+    real dumps exist to diff."
+  - Raw-trace file dump (if trimmed) — verb: "follow-on behind demand;
+    the TempFileManager fd-append it would reuse ships in WS11
+    regardless." Both conditional rows deleted if they land.
 - Deferred-with-design from earlier cycles — see the 5.3 plan tail; its
   items remain claimed or killed there.
