@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/cdp-mcp-server"><img src="https://img.shields.io/npm/v/cdp-mcp-server" alt="npm version"></a>
   <img src="https://img.shields.io/badge/tools-15-green" alt="Tools">
-  <img src="https://img.shields.io/badge/sub--actions-130+-green" alt="Actions">
+  <img src="https://img.shields.io/badge/sub--actions-130-green" alt="Actions">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="License">
 </p>
@@ -38,7 +38,7 @@ CDP Browser MCP Server connects to your **already-running** browser over a WebSo
 | Browser Use needs Python + LLM key | Heavy framework, double LLM cost |
 | BrowserTools MCP is read-only | Can observe but can't automate |
 
-**This server**: connects to Chrome on `localhost:9222`, uses the real browser state, and gives you **130+ automation actions** across 15 tools - built as a modular TypeScript codebase with 2 dependencies. Geolocation spoofing automatically grants browser permissions so permission-based sites just work.
+**This server**: connects to Chrome on `localhost:9222`, uses the real browser state, and gives you **130 automation actions** across 15 tools - built as a modular TypeScript codebase with 2 dependencies. Geolocation spoofing automatically grants browser permissions so permission-based sites just work.
 
 ---
 
@@ -77,7 +77,7 @@ CDP Browser MCP Server connects to your **already-running** browser over a WebSo
 | Connects to real browser | **Yes** | Via flag only | No (cloud) | No | Read-only |
 | Preserves cookies/sessions | **Yes** | No | No | No | Yes |
 | Works with extensions | **Yes** | No | No | No | Yes |
-| Tool count | **15 tools, 130+ actions** | ~30 tools | ~10 tools | 7 tools | ~13 tools |
+| Tool count | **15 tools, 130 actions** | ~30 tools | ~10 tools | 7 tools | ~13 tools |
 | Auto-connect | **Yes** (first tool call) | No | N/A | No | No |
 | Auto-waiting after actions | **Yes** | Yes | Yes | No | N/A |
 | Smart form filling | **Yes** (combobox, React Select) | Native `<select>` only | Via AI | No | No |
@@ -302,7 +302,7 @@ When a connection fails, the server auto-detects the failure mode and prints the
 | `interact` | 12 | Click, hover, type, fill, select, press, drag, scroll, upload, focus, check, tap |
 | `form` | 3 | Smart form filling engine — fill, read, clear; handles text, combobox, checkbox, radio, select, date in one call |
 | `execute` | 3 | JavaScript evaluation — expressions, async scripts, element-scoped calls |
-| `observe` | 7 | Console messages, network requests, performance metrics, memory counters, downloads, HAR export |
+| `observe` | 11 | Console messages, network requests, performance metrics, render-performance insights (LCP/CLS), memory counters, heap dump + offline summary, downloads, HAR export |
 | `emulate` | 18 | Viewport, color scheme, geolocation, network throttling (presets ride per-request ByRule rules on Chrome 152+), per-request `networkRules`, timezone, locale, vision deficiency, device posture, CPU performance tier, click-marker visualization, navigator network-state spoof |
 | `storage` | 11 | Cookie CRUD (incl. CHIPS `partitionKey` set/delete + `| partitioned:` display in listings), localStorage/sessionStorage management, storage clearing, quota inspection, auth-state export/import (partitionKey round-trips) |
 | `webauthn` | 12 | Passkey testing with virtual authenticators — create/inject credentials, credential-property mutation, presence + UV simulation, negative-testing override bits |
@@ -407,6 +407,10 @@ Fill entire forms in a single call. Auto-detects field types and handles framewo
 | `network` | List network requests | `tabId` | `filter`, `types`, `last`, `clear` |
 | `request` | Get full request/response body | `tabId`, `requestId` | — |
 | `performance` | DOM size, JS heap, layout metrics | `tabId` | — |
+| `perf_start` | Begin render-performance recording (CDP Tracing, `loading` category; optional `categories: ["v8"]` escalation) | `tabId` | `categories` |
+| `perf_stop` | Stop the recording and aggregate token-capped insights: LCP (last candidate per frame), CLS (final cumulative, input shifts excluded) | `tabId` | — |
+| `heap_dump` | Stream a full .heapsnapshot of the tab's renderer heap to a session temp file (opt-in: `confirm: true` — dumps can carry auth-state material; `clean_temp` removes, nothing auto-deletes) | `tabId`, `confirm` | — |
+| `heap_summary` | Offline parse of a .heapsnapshot: node/edge/string counts, top constructors by SELF size, detachedness rollup, bounded GC-root paths (no dominator tree; "retained" not claimed) | `path` | `top`, `hintDepth`, `hintBudget` |
 | `memory` | DOM/JS memory counters before/after a forced GC sweep (Performance fallback when the Memory domain is unresponsive) | `tabId` | — |
 | `downloads` | List tracked file downloads | `tabId` | `last`, `clear` |
 | `har` | Export captured network data as HAR 1.2 JSON | `tabId` | — |

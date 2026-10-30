@@ -43,6 +43,7 @@ import { preprocessToolCall } from './tools/dispatch.js';
 import { defineTool, success } from './tools/base-tool.js';
 import { listTools } from './tools/list-tools.js';
 import { applyWebMcpEvent, clearWebMcpState } from './tools/webmcp.js';
+import { appendTraceChunk } from './utils/trace-insights.js';
 import { ActionableError, wrapError } from './utils/error-handler.js';
 import type { ServerContext, FileChooserHandler } from './types.js';
 
@@ -62,10 +63,9 @@ import { registerFormTools } from './tools/form.js';
 import { registerWebauthnTools } from './tools/webauthn.js';
 import { WebAuthnStateManager } from './session/webauthn-state.js';
 import { getSlimTools, mapSlimToFull } from './tools/slim-mode.js';
+import { VERSION } from './version.js';
 
 // ─── Bootstrap ──────────────────────────────────────────────────────
-
-const VERSION = '5.3.5';
 
 const config = loadConfig();
 
@@ -288,6 +288,64 @@ function wireEventPipeline(serverCtx: ServerContext): void {
         if (reqs?.has(reqId)) {
           reqs.get(reqId)!.size = params.encodedDataLength as number;
         }
+        break;
+      }
+
+      // ── Performance trace recordings (observe perf_start/perf_stop, 5.4 WS10) ──
+      // Synchronous append in the dispatch path — the append-discipline
+      // contract (chunk k completes before k+1). No recording entry = no-op,
+      // so passive Tracing events cost nothing.
+      case 'Tracing.dataCollected': {
+        const rec = serverCtx.perfTraces.get(sessionId);
+        if (rec) appendTraceChunk(rec, params.value);
+        break;
+      }
+
+      case 'Tracing.tracingComplete': {
+        const rec = serverCtx.perfTraces.get(sessionId);
+        if (rec) {
+          rec.completed = true;
+          rec.dataLoss = Boolean(params.dataLossOccurred);
+        }
+        break;
+      }
+
+      // Session death prunes in-flight perf recordings (5.2 cleanup-law
+      // shape: per-tab state dies with the session — the browser drops
+      // tracing on detach, so there is nothing left to best-effort-end).
+      case 'Inspector.detached': {
+        serverCtx.perfTraces.delete(sessionId);
+        const hd = serverCtx.heapDumps.get(sessionId);
+        if (hd) { try { hd.writer.abandon(); } catch { } serverCtx.heapDumps.delete(sessionId); }
+        break;
+      }
+
+      case 'Target.detachedFromTarget': {
+        if (typeof params.sessionId === 'string') {
+          serverCtx.perfTraces.delete(params.sessionId);
+          const hd = serverCtx.heapDumps.get(params.sessionId);
+          if (hd) { try { hd.writer.abandon(); } catch { } serverCtx.heapDumps.delete(params.sessionId); }
+        }
+        break;
+      }
+
+      // ── Heap dump streaming (observe heap_dump, 5.4 WS11) ──
+      // Synchronous append in the dispatch path — the append-discipline
+      // contract: chunks flow to the .partial temp file, which is renamed
+      // (never advertised complete early) only after takeHeapSnapshot resolves.
+      case 'HeapProfiler.addHeapSnapshotChunk': {
+        const dump = serverCtx.heapDumps.get(sessionId);
+        if (dump) {
+          try {
+            dump.writer.write(String(params.chunk ?? ''));
+          } catch { /* cap-abort: the dump errors out at finalize time */ }
+        }
+        break;
+      }
+
+      case 'HeapProfiler.reportHeapSnapshotProgress': {
+        const dump = serverCtx.heapDumps.get(sessionId);
+        if (dump && params.finished === true) dump.finished = true;
         break;
       }
 
@@ -548,6 +606,8 @@ const ctx: ServerContext = {
   pendingFileChoosers: new Map(),
   pausedTabs: new Map(),
   pendingFetchRequests: new Map(),
+  perfTraces: new Map(),
+  heapDumps: new Map(),
   webmcpTools: new Map(),
   webmcpInvocations: new Map(),
 };
