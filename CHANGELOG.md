@@ -2,7 +2,7 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
-## [5.4.0] - UNRELEASED
+## [5.4.0] - 2026-10-30
 
 ### Added
 - **observe `heap_dump` / `heap_summary` (WS11)** — full-renderer-heap `.heapsnapshot` to a session temp file (explicit `tabId`, **opt-in** via `confirm: true` — dumps can carry auth-state material from page JS; the tool description states the temp location + lifecycle: `clean_temp` removes, nothing auto-deletes). Chunks stream synchronously from `HeapProfiler.addHeapSnapshotChunk` in the event pipeline into a `*.partial` temp file; the file is atomically renamed ONLY when `takeHeapSnapshot` resolves (a lost session abandons the `.partial` orphan — never advertised complete). `heap_summary` parses offline in-process with a hand-rolled one-pass char-stepper parser (zero new runtime deps): int tokens convert straight into preallocated typed arrays sized from the header — a streaming fixture proves a large snapshot never materializes; a size cap (500MB default) refuses with an actionable error and leaves the file untouched. Output: node/edge/string counts, top constructors by SELF size (self-size semantics, honest header: `"retained" NOT claimed` — no dominator tree ships), `detachedness` rollup (detached-context leak hint), and bounded-depth GC-root BFS paths to the top offenders. Column indices resolve from `meta.node_fields` NAMES — detachedness-era 6-field and older 5-field dumps both parse (shuffled-field fixture pins the resolver). Dev-validated against a live Brave-153 13.2MB artifact (119k nodes / 606k edges in 0.7s).

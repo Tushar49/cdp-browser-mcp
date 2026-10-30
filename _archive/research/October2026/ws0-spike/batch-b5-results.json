@@ -1,0 +1,64 @@
+{
+  "at": "2026-10-30T06:41:08.374Z",
+  "totalEvents": 83,
+  "interesting": {
+    "EventDispatch": 4,
+    "Responsiveness.Renderer.UserInteraction": 1,
+    "EventTiming": 14
+  },
+  "topNames": [
+    [
+      "EventTiming",
+      14
+    ],
+    [
+      "v8.callFunction",
+      7
+    ],
+    [
+      "SoftNavigationContext::OnInputOrScroll",
+      6
+    ],
+    [
+      "EventDispatch",
+      4
+    ],
+    [
+      "MetricsWebContentsObserver::UpdateTiming",
+      4
+    ],
+    [
+      "AnimationFrame",
+      4
+    ],
+    [
+      "thread_name",
+      3
+    ],
+    [
+      "FunctionCall",
+      3
+    ],
+    [
+      "ThrottlingURLLoader::ThrottlingURLLoader",
+      3
+    ],
+    [
+      "ThrottlingURLLoader::Start",
+      3
+    ],
+    [
+      "ThrottlingURLLoader::StartNow",
+      3
+    ],
+    [
+      "process_name",
+      2
+    ]
+  ],
+  "samples": [
+    "{\"args\":{\"data\":{\"interactionType\":\"keyboard\",\"maxDuration\":1},\"frame\":\"67172587015EC1093D232CCAC89CE993\"},\"cat\":\"devtools.timeline\",\"dur\":18,\"name\":\"Responsiveness.Renderer.UserInteraction\",\"ph\":\"X\",\"pid\":13168,\"tdur\":16,\"tid\":3012,\"ts\":91907326971,\"tts\":813030}",
+    "{\"args\":{\"data\":{\"cancelable\":true,\"duration\":1.605,\"enqueuedToMainThreadTime\":3106.253,\"frame\":\"67172587015EC1093D232CCAC89CE993\",\"interactionId\":4995,\"interactionOffset\":8,\"nodeId\":7,\"processingEnd\":3107.127,\"processingStart\":3106.93,\"timeStamp\":3105.574,\"type\":\"keydown\"}},\"cat\":\"devtools.timeline"
+  ],
+  "dataLoss": false
+}

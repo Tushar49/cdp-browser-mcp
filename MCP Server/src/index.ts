@@ -66,7 +66,7 @@ import { getSlimTools, mapSlimToFull } from './tools/slim-mode.js';
 
 // ─── Bootstrap ──────────────────────────────────────────────────────
 
-const VERSION = '5.3.5';
+const VERSION = '5.4.0';
 
 const config = loadConfig();
 

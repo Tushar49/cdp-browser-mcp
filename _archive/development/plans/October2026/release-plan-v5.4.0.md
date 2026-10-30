@@ -522,19 +522,21 @@ cross-check, no browser in the unit path).
 
 ### WS12 — slack / catch-up (0.25)
 
-`overrideNetworkState` shipped in 5.3.5 — the old catch-up is void.
-Priority use: **exactly ONE bounded retry for a class the probe KILLED**
-— per the PROBE RESULT that is EventTiming (B1-day ×32 vs zero today).
-Its retry needs a REAL user-driven input event on the rig (page code
-cannot fake it); the maintainer performs one deliberate click during the
-retry window or the retry is skipped. GO or re-KILL into the 5.5
-carcass with a verb; never a third attempt. Second candidate:
-trace-output file dump ONLY if WS10's raw-dump stretch was trimmed AND
-the probe survived — within-cycle catch-ups only (two-lane law);
-trim-order cuts are final for the cycle. Otherwise: buffer, plus
-slim-mode schema budget re-check (5.2's slim-output tests as canary;
-SSOT: new observe actions stay OUT of the 6-slim schema — slim remains
-subset-of-daily-use; degrade with an error naming full mode if invoked).
+**DONE 2026-10-30.** (1) The ONE bounded retry ran for EventTiming
+(`probe-batch-b5-eventtiming.mjs`, ONE connection + the maintainer's two
+deliberate clicks inside a 7s trace window): **GO** — the trace carried
+`EventTiming ×14` with full per-interaction shapes (interactionId,
+duration, nodeId, type=keydown, processingStart/End, enqueue time) plus
+`Responsiveness.Renderer.UserInteraction ×1` (interactionType keyboard)
+and `SoftNavigationContext::OnInputOrScroll ×6`. Verdict recorded to the
+5.5 carcass: **EventTiming/INP = FIRST-CLASS in 5.5** (real-input
+required; usage note in the tool description when it ships). NO product
+change inside 5.4.0 (no budget — retry only finalizes bookkeeping; the
+"never a third attempt" rule spent this attempt with a GO outcome).
+(2) slim-mode schema budget re-check: the full suite incl.
+`slim-output-budget.test.ts` is green with the observe description at 11
+operation bullets — no change needed. (3) In-cycle fixes: none beyond
+the WS10 scrubber gap (already recorded as its own Fixed entry).
 
 - **5.4.0 count sweep (full mode)** — expected-value table (momus T1-1,
   values pre-computed from disk; re-derive at sweep time):
@@ -598,7 +600,7 @@ close-out self-audit — 5.3.5's canary churn was comparable.
 | 5 | WS10 probe (standalone, step zero) | 0.25 | **DONE 2026-10-30** — RESULT block recorded: LCP+CLS GO, LongTask+EventTiming KILL, parse-once, set=`'loading'` | 5.4.0 |
 | 6 | WS10 perf insights | 1–1.5 | **GATE PASS 2026-10-30** — LCP (552ms, rig H1) + 4 shifts recorded via live slow3g + `['loading']` through the tool path; second-stop contract PASS; class capture is run-nondeterministic (see PROBE RESULT addendum) | 5.4.0 |
 | 7 | WS11 heap dump + summary | 1 | **GATE PASS 2026-10-30** — ground-truth `HeapGateMarker ×421` exact in the offline summary of the live 9.1MB rig dump (86,543 nodes / 385k edges); opt-in gate + streaming finalize + honest header all PASS | 5.4.0 |
-| 8 | WS12 slack/catch-up | 0.25 | bounded-retry GO/re-KILL, else empty | 5.4.0 |
+| 8 | WS12 slack/catch-up | 0.25 | **DONE** — EventTiming retry GO → 5.5 first-class; slim-mode re-check green (no change) | 5.4.0 |
 | 9 | 5.4.0 sweep + release | 0.5 | sweep table empty, pipeline green | 5.4.0 |
 
 Self-audit + buffer (momus T2-10): table total ≈ 4.25–5.5 sessions
@@ -680,12 +682,13 @@ halves' release rows).
     "revalidate when a Chromium build ships perf events the probe could
     capture — both days exhausted every category combo; rig ground
     truth proves the tasks RAN but the trace never carried them").
-  - EventTiming/INP interaction-delay class — **KILLED once, with one
-    recorded exemption:** B1-day ×32 under `[devtools.timeline, v8]` vs
-    zero across 3 configs on the re-run. WS12 may spend the ONE bounded
-    retry (needs a real user click on the rig; maintainer-driven, see
-    WS12 row). If the retry also fails → verb: "revalidate only when a
-    future workstream rigs real input tests."
+  - EventTiming/INP interaction-delay class — **= 5.5 FIRST-CLASS
+    (flipped at the WS12 bounded retry, 2026-10-30):** with real user
+    input the trace carried EventTiming ×14 with complete per-
+    interaction shapes (B5 artifacts). Verb: "implement in 5.5 as a
+    perf_stop insight class gated on REAL input events (usage note in
+    perf_start/tool description: record during interactions); the WS12
+    bounded retry is SPENT — no further probes."
   - `heap_diff` (if trimmed) — verb: "implement as a follow-on once two
     real dumps exist to diff."
   - Raw-trace file dump (if trimmed) — verb: "follow-on behind demand;
