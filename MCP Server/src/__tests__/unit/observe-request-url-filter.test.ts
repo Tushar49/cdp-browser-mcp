@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerObserveTools } from '../../tools/observe.js';
+import { VERSION } from '../../version.js';
 import type { NetworkRequestEntry, ServerContext } from '../../types.js';
 
 interface RecordedCall {
@@ -132,5 +133,35 @@ describe('observe.request — urlFilter (Playwright parity)', () => {
 
     const bodyCall = ctx.__calls.find(c => c.method === 'Network.getResponseBody');
     expect(bodyCall?.params?.requestId).toBe('99');
+  });
+});
+
+describe('observer.har exports the captured in-memory store (oracle review regression pin)', () => {
+  it('emits one HAR 1.2 entry per captured request, stamped with the current VERSION', async () => {
+    const reqMap = new Map([
+      ['1', entry('1', 'https://api.example.com/users', 100)],
+      ['2', entry('2', 'https://api.example.com/orders', 150, 404)],
+    ]);
+    const ctx = mockCtxWithNetwork(reqMap);
+    const reg = new ToolRegistry();
+    registerObserveTools(reg, ctx);
+
+    const result = await reg.dispatch('observe', { action: 'har', tabId: 't1', _sessionId: 's1' }, ctx);
+    expect(result.isError).toBeFalsy();
+    const har = JSON.parse((result.content[0] as { text: string }).text) as {
+      log: { version: string; creator: { name: string; version: string }; entries: Array<{ request: { url: string; method: string }; response: { status: number } }> };
+    };
+    expect(har.log.version).toBe('1.2');
+    expect(har.log.entries).toHaveLength(2);
+    expect(har.log.entries.map((e) => e.response.status)).toContain(404);
+    expect(har.log.creator.version).toBe(VERSION);
+  });
+
+  it('still reports the empty message when nothing was captured', async () => {
+    const ctx = mockCtxWithNetwork(new Map());
+    const reg = new ToolRegistry();
+    registerObserveTools(reg, ctx);
+    const result = await reg.dispatch('observe', { action: 'har', tabId: 't1', _sessionId: 's1' }, ctx);
+    expect((result.content[0] as { text: string }).text).toContain('No network requests captured yet');
   });
 });

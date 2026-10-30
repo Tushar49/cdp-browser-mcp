@@ -63,10 +63,9 @@ import { registerFormTools } from './tools/form.js';
 import { registerWebauthnTools } from './tools/webauthn.js';
 import { WebAuthnStateManager } from './session/webauthn-state.js';
 import { getSlimTools, mapSlimToFull } from './tools/slim-mode.js';
+import { VERSION } from './version.js';
 
 // ─── Bootstrap ──────────────────────────────────────────────────────
-
-const VERSION = '5.4.0';
 
 const config = loadConfig();
 

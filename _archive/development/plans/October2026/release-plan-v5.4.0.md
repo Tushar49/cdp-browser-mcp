@@ -613,7 +613,11 @@ scrubber URL-token matrix that turned into a real Fixed entry —
 temp-writer contracts grew beyond the parser fixtures: append
 discipline, .partial lifecycle, cap-abort, shuffled-fields resolver,
 500k-row streaming fixture, wiring batch) → **533 green at the WS11
-close**. WS12 + bounded-retry delta TBD (0 if empty). (5.3.5 actuals: 479 → 504 = +25 vs planned +16.) Plus
+close**. Post-review HAR regression fix added +2 pins → **535 green at
+release** (the oracle review's har-never-exports claim was VALID —
+fixed + pinned; its HeapProfiler.enable "verify item" was REFUTED by
+the live WS11 gate: takeHeapSnapshot streams without domain enable).
+WS12 + bounded-retry delta TBD (0 if empty). (5.3.5 actuals: 479 → 504 = +25 vs planned +16.) Plus
 0.25–0.5 live-fix buffer (4 in-cycle fixes in 5.2, webmcp round-trip
 shape in 5.3, scrubber/`_noScrub` in 5.3.5). Self-audit line required
 at close-out: table sum vs stated totals, per half, plus where the

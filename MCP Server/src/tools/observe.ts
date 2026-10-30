@@ -8,6 +8,7 @@
 import type { ToolRegistry } from './registry.js';
 import type { ServerContext, ToolResult, NetworkRequestEntry, DownloadEntry } from '../types.js';
 import { TempFileManager } from '../utils/temp-files.js';
+import { VERSION } from '../version.js';
 import { createPerfTraceRecording, aggregateTraceInsights } from '../utils/trace-insights.js';
 import { summarizeHeapSnapshot } from '../utils/heap-insights.js';
 import { isMethodMissingError } from '../connection/capabilities.js';
@@ -564,11 +565,14 @@ async function handleDownloads(
 async function handleHar(
   ctx: ServerContext,
   params: Record<string, unknown>,
-): Promise<ToolResult> {  const sess = params._sessionId as string;
+): Promise<ToolResult> {
+  const sess = params._sessionId as string;
   await ctx.sendCommand('Network.enable', {}, sess);
 
-  // Requests from runtime integration layer
-  const reqs: Array<Record<string, unknown>> = [];
+  // Live in-memory store filled by the runtime event pipeline
+  // (Network.requestWillBeSent / responseReceived / loadingFinished in index.ts)
+  const reqMap = ctx.networkReqs.get(sess);
+  const reqs: NetworkRequestEntry[] = reqMap ? [...reqMap.values()] : [];
   if (!reqs.length) return ok('No network requests captured yet. Navigate or interact first.');
 
   // Build HAR 1.2 structure
@@ -606,7 +610,7 @@ async function handleHar(
   const har = {
     log: {
       version: '1.2',
-      creator: { name: 'CDP Browser MCP Server', version: '5.0.0' },
+      creator: { name: 'CDP Browser MCP Server', version: VERSION },
       entries,
     },
   };
