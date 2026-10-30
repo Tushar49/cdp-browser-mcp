@@ -1,0 +1,232 @@
+{
+  "probes": [
+    {
+      "name": "B4-0 pre-bringToFront visibility + __PERF",
+      "verdict": "?",
+      "evidence": "{\"type\":\"string\",\"value\":\"{\\\"vis\\\":\\\"visible\\\",\\\"focus\\\":true,\\\"perfIdentities\\\":[\\\"lcp\\\",\\\"clsTotal\\\",\\\"shifts\\\",\\\"longTasks\\\"],\\\"lcp\\\":0,\\\"shifts\\\":0,\\\"tasks\\\":0}\"}"
+    },
+    {
+      "name": "B4-1 bringToFront",
+      "verdict": "OK",
+      "evidence": ""
+    },
+    {
+      "name": "B4-2 post-bringToFront visibility",
+      "verdict": "?",
+      "evidence": "{\"type\":\"string\",\"value\":\"{\\\"vis\\\":\\\"visible\\\",\\\"focus\\\":false}\"}"
+    },
+    {
+      "name": "B4-3 __PERF raw (page-side observers)",
+      "verdict": "RECORDED",
+      "evidence": "{\"type\":\"string\",\"value\":\"{\\\"lcp\\\":[],\\\"clsTotal\\\":0.0035,\\\"shifts\\\":[{\\\"ms\\\":2353.6,\\\"value\\\":0.016,\\\"nodded\\\":false},{\\\"ms\\\":2355.1,\\\"value\\\":0.0181,\\\"nodded\\\":false},{\\\"ms\\\":2361.8,\\\"value\\\":0.016,\\\"nodded\\\":false},{\\\"ms\\\":2370.8,\\\"value\\\":0.0134,\\\"nodded\\\":false},{\\\"ms\\\":2377.2,\\\"value\\\":0.0085,\\\"nodded\\\":false},{\\\"ms\\\":2382.9,\\\"value\\\":0.0035,\\\"nodded\\\":false}],\\\"longTasks\\\":[{\\\"ms\\\":1002,\\\"dur\\\":250,\\\"name\\\":\\\"self\\\"},{\\\"ms\\\":2016.9,\\\"dur\\\":250,\\\"name\\\":\\\"self\\\"}]}\"}"
+    },
+    {
+      "name": "B4-4 screencast paint-forcer",
+      "verdict": "REJECT \"Page.startScreencast → {\\\"code\\\":-32602,\\\"message\\\":\\\"Invalid parameters\\\",\\\"data\\\":\\\"Failed to deserialize params.form",
+      "evidence": ""
+    },
+    {
+      "name": "B4-5 visibility under screencast",
+      "verdict": "?",
+      "evidence": "{\"type\":\"string\",\"value\":\"{\\\"vis\\\":\\\"hidden\\\",\\\"focus\\\":false}\"}"
+    },
+    {
+      "name": "B4-6 WARMUP throwaway [devtools.timeline]",
+      "verdict": "{}",
+      "evidence": "total=637 complete={\"dataLoss\":false}"
+    },
+    {
+      "name": "B4-7 pristine [loading]",
+      "verdict": "{}",
+      "evidence": "total=234 maxChunk=234 complete={\"dataLoss\":false}"
+    },
+    {
+      "name": "B4-9 busy overlay [v8, loading, devtools.timeline, disabled-by-default-devtools.timeline]",
+      "verdict": "{\"RunTask\":3575}",
+      "evidence": "total=5477 maxChunk=405 complete={\"dataLoss\":false}\n    lt={\"args\":{},\"cat\":\"disabled-by-default-devtools.timeline\",\"dur\":33,\"name\":\"RunTask\",\"ph\":\"X\",\"pid\":25292,\"tdur\":33,\"tid\":22036,\"ts\":87305925651,\"tts\":13176} | {\"args\":{},\"cat\":\"disabled-by-default-devtools.timeline\",\"dur\":74,\"name\":\"RunTask\",\"ph\":\"X\",\"pid\":24588,\"tdur\":57,\"tid\":10\n    timing=-\n    top=[[\"RunTask\",3575],[\"UpdateLayer\",357],[\"GPUTask\",75],[\"UpdateCounters\",56],[\"Parallel scavenge started\",46],[\"ComputeWeaknessProcessor start\",44],[\"ClearWeaknessProcessor start\",44],[\"RasterTask\",37],[\"v8.newInstance\",37],[\"Layer:created\",33],[\"v8.callFunction\",32],[\"V8.GC_HEAP_EXTERNAL_PROLOGUE\",32],[\"MinorGC\",32],[\"V8.GC_HEAP_PROLOGUE\",32],[\"V8.GCScavenger\",32]]"
+    },
+    {
+      "name": "B4-11 volume [v8, loading] pristine",
+      "verdict": "{\"firstMeaningfulPaintCandidate\":1,\"firstContentfulPaint\":1,\"firstPaint\":1,\"largestContentfulPaint::Candidate\":1,\"LayoutShift\":1}",
+      "evidence": "total=460 chunks=2 maxChunk=342 complete={\"dataLoss\":false} top=[[\"v8.callFunction\",53],[\"v8.newInstance\",47],[\"FrameLoader:state_snapshot\",16],[\"v8.compile\",15],[\"v8.run\",15],[\"v8.produceCache\",15],[\"MetricsWebContentsObserver::UpdateTiming\",13],[\"MinorGC\",12],[\"V8.GCScavenger\",12],[\"ThrottlingURLLoader::ThrottlingURLLoader\",9],[\"ThrottlingURLLoader::Start\",9],[\"ThrottlingURLLoader::StartNow\",9],[\"PageTimingMetricsSender::SendNow\",8],[\"DocumentLoader::Documen"
+    },
+    {
+      "name": "B4-12 GO table",
+      "verdict": "{\"LCP_on_pristine\":false,\"CLS_on_pristine\":false,\"LongTask_or_RunTask_busyOverlay\":true,\"EventTiming_anyOverlay\":false,\"v8VolumeUnder50kCap\":true}",
+      "evidence": "vis before={\"type\":\"string\",\"value\":\"{\\\"vis\\\":\\\"visible\\\",\\\"focus\\\":true,\\\"perfIdentities\\\":[\\\"lcp\\\",\\\"clsTotal\\\",\\\"shifts\\\",\\\"longTasks\\\"],\\\"lcp\\\":0,\\\"shifts\\\":0,\\\"tasks\\\":0}\"} after={\"type\":\"string\",\"value\":\"{\\\"vis\\\":\\\"visible\\\",\\\"focus\\\":false}\"} screencast={\"type\":\"string\",\"value\":\"{\\\"vis\\\":\\\"hidden\\\",\\\"focus\\\":false}\"}; pristine total=234; busy-overlay total=5477; volume total=460 — 50k cap SAFE for parse-once"
+    }
+  ],
+  "startedAt": "2026-10-30T05:24:00.364Z",
+  "summary": {
+    "go": {
+      "LCP_on_pristine": false,
+      "CLS_on_pristine": false,
+      "LongTask_or_RunTask_busyOverlay": true,
+      "EventTiming_anyOverlay": false,
+      "v8VolumeUnder50kCap": true
+    },
+    "diagnostics": {
+      "vis0": {
+        "type": "string",
+        "value": "{\"vis\":\"visible\",\"focus\":true,\"perfIdentities\":[\"lcp\",\"clsTotal\",\"shifts\",\"longTasks\"],\"lcp\":0,\"shifts\":0,\"tasks\":0}"
+      },
+      "vis1": {
+        "type": "string",
+        "value": "{\"vis\":\"visible\",\"focus\":false}"
+      },
+      "vis2": {
+        "type": "string",
+        "value": "{\"vis\":\"hidden\",\"focus\":false}"
+      },
+      "perf1": {
+        "type": "string",
+        "value": "{\"lcp\":[],\"clsTotal\":0.0035,\"shifts\":[{\"ms\":2353.6,\"value\":0.016,\"nodded\":false},{\"ms\":2355.1,\"value\":0.0181,\"nodded\":false},{\"ms\":2361.8,\"value\":0.016,\"nodded\":false},{\"ms\":2370.8,\"value\":0.0134,\"nodded\":false},{\"ms\":2377.2,\"value\":0.0085,\"nodded\":false},{\"ms\":2382.9,\"value\":0.0035,\"nodded\":false}],\"longTasks\":[{\"ms\":1002,\"dur\":250,\"name\":\"self\"},{\"ms\":2016.9,\"dur\":250,\"name\":\"self\"}]}"
+      },
+      "screencast": false
+    },
+    "pristine": {
+      "total": 234,
+      "interesting": {},
+      "ls": "",
+      "lcp": "",
+      "topNames": [
+        [
+          "MetricsWebContentsObserver::UpdateTiming",
+          18
+        ],
+        [
+          "FrameLoader:state_snapshot",
+          16
+        ],
+        [
+          "PageTimingMetricsSender::SendNow",
+          7
+        ],
+        [
+          "DocumentLoader::DocumentLoader",
+          6
+        ],
+        [
+          "DocumentLoader::CommitNavigation",
+          6
+        ],
+        [
+          "DocumentLoader::InitializeWindow",
+          6
+        ],
+        [
+          "DocumentLoader::RecordUseCountersForCommit",
+          6
+        ],
+        [
+          "DocumentLoader::DidInstallNewDocument",
+          6
+        ],
+        [
+          "DocumentLoader::StartLoadingResponse",
+          6
+        ],
+        [
+          "DocumentLoader::CreateParserPostCommit",
+          6
+        ],
+        [
+          "ThrottlingURLLoader::ThrottlingURLLoader",
+          6
+        ],
+        [
+          "ThrottlingURLLoader::Start",
+          6
+        ],
+        [
+          "ThrottlingURLLoader::StartNow",
+          6
+        ],
+        [
+          "PrefetchMatchResolver::FindPrefetchInternal2",
+          5
+        ],
+        [
+          "PrefetchMatchResolver::UnblockInternal",
+          5
+        ]
+      ]
+    },
+    "busyOverlay": {
+      "total": 5477,
+      "interesting": {
+        "RunTask": 3575
+      },
+      "lt": "{\"args\":{},\"cat\":\"disabled-by-default-devtools.timeline\",\"dur\":33,\"name\":\"RunTask\",\"ph\":\"X\",\"pid\":25292,\"tdur\":33,\"tid\":22036,\"ts\":87305925651,\"tts\":13176} | {\"args\":{},\"cat\":\"disabled-by-default-devtools.timeline\",\"dur\":74,\"name\":\"RunTask\",\"ph\":\"X\",\"pid\":24588,\"tdur\":57,\"tid\":10640,\"ts\":87305925821,\"tts\":27047}",
+      "timing": "",
+      "maxChunk": 405
+    },
+    "volume": {
+      "total": 460,
+      "chunks": 2,
+      "maxChunk": 342,
+      "topNames": [
+        [
+          "v8.callFunction",
+          53
+        ],
+        [
+          "v8.newInstance",
+          47
+        ],
+        [
+          "FrameLoader:state_snapshot",
+          16
+        ],
+        [
+          "v8.compile",
+          15
+        ],
+        [
+          "v8.run",
+          15
+        ],
+        [
+          "v8.produceCache",
+          15
+        ],
+        [
+          "MetricsWebContentsObserver::UpdateTiming",
+          13
+        ],
+        [
+          "MinorGC",
+          12
+        ],
+        [
+          "V8.GCScavenger",
+          12
+        ],
+        [
+          "ThrottlingURLLoader::ThrottlingURLLoader",
+          9
+        ],
+        [
+          "ThrottlingURLLoader::Start",
+          9
+        ],
+        [
+          "ThrottlingURLLoader::StartNow",
+          9
+        ],
+        [
+          "PageTimingMetricsSender::SendNow",
+          8
+        ],
+        [
+          "DocumentLoader::DocumentLoader",
+          6
+        ],
+        [
+          "DocumentLoader::CommitNavigation",
+          6
+        ]
+      ]
+    }
+  }
+}

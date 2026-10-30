@@ -1,0 +1,111 @@
+{
+  "probes": [
+    {
+      "name": "B3-0 foreground battery tab",
+      "verdict": "OK",
+      "evidence": "painted tab required for LCP/CLS"
+    },
+    {
+      "name": "B3-1 rig boot check (page-side ground truth exists)",
+      "verdict": "NO — rig broken?",
+      "evidence": "undefined"
+    },
+    {
+      "name": "B3-2 pristine [loading]",
+      "verdict": "{}",
+      "evidence": "total=316 maxChunk=316 ls=-\n    lcp=- lt=- complete={\"dataLoss\":false}"
+    },
+    {
+      "name": "B3-3 busy-driven overlay [v8, loading, devtools.timeline, disabled-by-default-devtools.timeline]",
+      "verdict": "{\"RunTask\":4316}",
+      "evidence": "total=6104 maxChunk=403 lt={\"args\":{},\"cat\":\"disabled-by-default-devtools.timeline\",\"dur\":84,\"name\":\"RunTask\",\"ph\":\"X\",\"pid\":25292,\"tdur\":83,\"tid\":22036,\"ts\":87123944714,\"tts\":5686} timing=- complete={\"dataLoss\":false}\n    top=[[\"RunTask\",4316],[\"UpdateLayer\",745],[\"GPUTask\",122],[\"v8.newInstance\",37],[\"UpdateCounters\",36],[\"RasterTask\",35],[\"v8.callFunction\",32],[\"Commit\",25],[\"ComputeWeaknessProcessor start\",21],[\"Parallel scavenge started\",21],[\"ClearWeaknessProcessor start\",21],[\"FunctionCall\",21]]"
+    },
+    {
+      "name": "B3-4 volume [v8, loading] pristine",
+      "verdict": "{}",
+      "evidence": "total=384 chunks=2 maxChunk=363 complete={\"dataLoss\":false} top=[[\"v8.newInstance\",37],[\"v8.callFunction\",32],[\"MetricsWebContentsObserver::UpdateTiming\",23],[\"FrameLoader:state_snapshot\",16],[\"v8.compile\",15],[\"v8.run\",15],[\"v8.produceCache\",15],[\"DocumentLoader::DocumentLoader\",6],[\"DocumentLoader::CommitNavigation\",6],[\"DocumentLoader::InitializeWindow\",6],[\"DocumentLoader::RecordUseCountersForCommit\",6],[\"DocumentLoader::DidInstallNewDocument\",6]]"
+    },
+    {
+      "name": "B3-5 GO table",
+      "verdict": "{\"LCP_on_pristine\":false,\"CLS_on_pristine\":false,\"LongTask_or_RunTask_busyOverlay\":true,\"EventTiming_busyOverlay\":false,\"v8VolumeUnder50kCap\":true}",
+      "evidence": "pristine total=316; busy-overlay total=6104; volume(v8+loading) total=384 — 50k cap safe for parse-once"
+    }
+  ],
+  "startedAt": "2026-10-30T05:21:03.103Z",
+  "summary": {
+    "go": {
+      "LCP_on_pristine": false,
+      "CLS_on_pristine": false,
+      "LongTask_or_RunTask_busyOverlay": true,
+      "EventTiming_busyOverlay": false,
+      "v8VolumeUnder50kCap": true
+    },
+    "pristine": {
+      "total": 316,
+      "interesting": {},
+      "lcp": "",
+      "ls": ""
+    },
+    "busyOverlay": {
+      "total": 6104,
+      "lt": "{\"args\":{},\"cat\":\"disabled-by-default-devtools.timeline\",\"dur\":84,\"name\":\"RunTask\",\"ph\":\"X\",\"pid\":25292,\"tdur\":83,\"tid\":22036,\"ts\":87123944714,\"tts\":5686}",
+      "timing": "",
+      "maxChunk": 403
+    },
+    "volume": {
+      "total": 384,
+      "chunks": 2,
+      "maxChunk": 363,
+      "topNames": [
+        [
+          "v8.newInstance",
+          37
+        ],
+        [
+          "v8.callFunction",
+          32
+        ],
+        [
+          "MetricsWebContentsObserver::UpdateTiming",
+          23
+        ],
+        [
+          "FrameLoader:state_snapshot",
+          16
+        ],
+        [
+          "v8.compile",
+          15
+        ],
+        [
+          "v8.run",
+          15
+        ],
+        [
+          "v8.produceCache",
+          15
+        ],
+        [
+          "DocumentLoader::DocumentLoader",
+          6
+        ],
+        [
+          "DocumentLoader::CommitNavigation",
+          6
+        ],
+        [
+          "DocumentLoader::InitializeWindow",
+          6
+        ],
+        [
+          "DocumentLoader::RecordUseCountersForCommit",
+          6
+        ],
+        [
+          "DocumentLoader::DidInstallNewDocument",
+          6
+        ]
+      ]
+    }
+  }
+}

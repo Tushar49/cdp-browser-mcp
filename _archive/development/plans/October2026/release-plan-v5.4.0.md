@@ -306,26 +306,53 @@ WS7).
 
 ## 5.4.0 — "observability" half (≈2.75–3.25 sessions)
 
+### WS10 PROBE RESULT (Batch B3/B4 — 2026-10-30, Brave 153 as-is, Bitwarden stands)
+
+Scripts: `probe-batch-b3-tracing.mjs` (+ `batch-b3-results.json`), refined
+self-diagnosing rerun `probe-batch-b4-tracing.mjs` (+ `batch-b4-results.json`).
+One connection each; 2 Allow dialogs of the 3-dialog budget spent. Refinement
+context: b3's first [loading] trace was COLD (316 events, zero paint classes —
+the B2-day pattern where trace #1 is a dud) — but warm traces ALSO came up
+empty while the b4 volume probe `[v8, loading]` captured everything. Recorded
+chirally — per-class decisions per the pre-declared binary rule:
+
+| Class | Verdict | Evidence |
+|---|---|---|
+| LCP | **GO** | B2-day `[loading]`: full shape (`candidateIndex, isMainFrame, nodeId, nodeName, performanceTimelineNavigationId, size, type` + frame) — B4-day `[v8, loading]`: `largestContentfulPaint::Candidate` ×1 again (even with page HIDDEN — browser-side metric pipeline, not paged paint) |
+| CLS | **GO** | B2-day `[loading]` full shape: `cumulative_score, had_recent_input, frame_max_distance, impacted_nodes[{node_id,old_rect,new_rect}]` — B4-day: `LayoutShift` ×1 |
+| LongTask | **KILL** | Rig ground-truth PROVED 250ms busy tasks ran (`__PERF.longTasks` ×2 page-side) — trace surfaced ZERO named `LongTask` events across every combo tried over two days (`devtools.timeline`, `v8`, `+devtools.timeline.frame`, `+disabled-by-default-devtools.timeline`, pristine & busy-driven). The 3575 `RunTask` events (`disabled-by-default-devtools.timeline`) are scheduler-generic with NO long-task semantics — unusable as an insight (would be fake). Non-negotiable: no LongTask row ships in 5.4. |
+| EventTiming / INP | **KILL** | B1-day ×32 (in a `[devtools.timeline, v8]` context) — ZERO today across 3 configs incl. v8+loading and the full busy overlay. Input-dependent; the rig cannot synthesize user input. |
+| v8 event volume | moot | v8 does NOT ship (no surviving class needs it). For the record: worst observed 637 warmup / 5477 busy-overlay total, maxChunk 405 — parse-once safe with enormous margin. |
+
+**Architecture decisions locked by this result:**
+1. **Category set = the single string `'loading'`** (lightest, and the ONLY
+   set with complete field shapes for BOTH shipped classes). `'v8'` re-enters
+   only if a carcass class revives.
+2. **Aggregator = parse-once at stop** (`perf_stop` aggregates all
+   `dataCollected` chunks arriving before `tracingComplete`). No incremental
+   redesign — volumes are 2-3 orders of magnitude under the 50k cap.
+3. **Flush-lag constraint (NEW, from the b4 diagnostics):** paint-gated metric
+   events are emitted by the browser-side pipeline on a lagged flush cadence
+   (b4's `__PERF` showed page-side shifts at 2.3s that the same window's
+   `[loading]` trace missed, while a LATER trace captured them). The
+   aggregator MUST include every chunk up to `tracingComplete` (it will), and
+   the live gate runs under slow3g throttling — the stretched load window
+   (2s+) is exactly where flush coverage aligns. `perf_start` description
+   should note capture quality depends on page rendering activity.
+4. Probe-script artifact on record: `Runtime.evaluate` boot-checks printed
+   "undefined" BOTH days even when trace capture worked — never chased; NOT a
+   product signal (the raw-response report in b4 confirmed the evaluations
+   actually returned strings).
+
+**Open maintainer input at WS12 (only if the bounded retry is pursued):**
+EventTiming's one retry needs a REAL user-driven input event on the rig
+(page observers can't fake it) — says so in the WS12 row if it ever runs.
+
 ### WS10 — perf insights flagship (1–1.5)
 
-**STEP ZERO — standalone class probe (live, before ANY WS10 code).** One
-canary script (1 CDP connection, 1 Allow dialog; template:
-`probe-batch-b2-tracing.mjs`) decides everything below; its outcome gets a
-RESULT block here, in the WS7 pattern, before `trace-insights.ts` exists
-(the "no code before batch outcome is recorded" rule extends to it):
-1. **Surviving classes**: probe `'v8'` overlay (+ `devtools.timeline` +
-   JS-sampling variants) on top of `'loading'` for LongTask/RunTask and
-   EventTiming. **Binary GO/KILL per class — never half-insights.**
-   B-cache: EventTiming only surfaced with `'v8'`; LongTask/RunTask
-   absent in every combination probed.
-2. **Event volume under `'v8'`**: high-frequency code/IC/GC events. If
-   `'v8'` survives, `perf_stop` MUST aggregate incrementally per-chunk
-   (cap applies to per-class raw storage, not parse input) — a
-   parse-once-at-end design truncates away LCP/CLS behind 50k v8 noise
-   events before they are ever seen. Pristine `'loading'`-only outcome →
-   parse-once stays (13–15 small chunks proven at WS7).
-3. Piggyback: confirm `detachedness`-era format from a live trace
-   session (feeds WS11's parser).
+**STEP ZERO — DONE (result recorded above, printed before the WS11
+section; all pre-conditions decided by live evidence, no code has been
+written against an unproven category set).**
 
 Home (locked): **`observe`, additive actions `perf_start` / `perf_stop`**
 — NOT a new tool; dodges the 15-tools string/badges' tool-count half of
@@ -464,8 +491,11 @@ cross-check, no browser in the unit path).
 
 `overrideNetworkState` shipped in 5.3.5 — the old catch-up is void.
 Priority use: **exactly ONE bounded retry for a class the probe KILLED**
-(e.g. EventTiming with the incremental aggregator) — GO or re-KILL into
-the 5.5 carcass with a verb; never a third attempt. Second candidate:
+— per the PROBE RESULT that is EventTiming (B1-day ×32 vs zero today).
+Its retry needs a REAL user-driven input event on the rig (page code
+cannot fake it); the maintainer performs one deliberate click during the
+retry window or the retry is skipped. GO or re-KILL into the 5.5
+carcass with a verb; never a third attempt. Second candidate:
 trace-output file dump ONLY if WS10's raw-dump stretch was trimmed AND
 the probe survived — within-cycle catch-ups only (two-lane law);
 trim-order cuts are final for the cycle. Otherwise: buffer, plus
@@ -518,9 +548,10 @@ exit via GO/KILL before any draft — they trim NOTHING (they get
 §5.5 carcass verbs instead). Flagship + heap core + sweep never trim;
 WS12 is the buffer.
 
-**Dialog budget: 3** (probe script + WS10 gate + WS11 gate, one CDP
-connection each; serve.mjs is plain HTTP; zero on flag mode) — well
-under 5.3.5's canary churn.
+**Dialog budget (revised at probe close): 4 total** — probes consumed 2
+(b3 + b4 self-diagnosing rerun), gates need 2 (WS10 + WS11, one CDP
+connection each; serve.mjs is plain HTTP; zero on flag mode). Still
+well under 5.3.5's canary churn.
 
 ## Sequencing (sequenced ties + gates)
 
@@ -530,7 +561,7 @@ under 5.3.5's canary churn.
 | 2 | WS8 ByRule + riders | 0.5–1 | throttle PASS, fallback TRUE, reset clears | 5.3.5 |
 | 3 | WS9 CHIPS round-trip | 0.25–0.5 | partitioned cookie survives export→import | 5.3.5 |
 | 4 | WS4 rerun + npm decision + 5.3.5 sweep + release | 0.5 | sweep table empty, pipeline green | 5.3.5 |
-| 5 | WS10 probe (standalone, step zero) | 0.25 | classes GO/KILL + volume + arch recorded here | 5.4.0 |
+| 5 | WS10 probe (standalone, step zero) | 0.25 | **DONE 2026-10-30** — RESULT block recorded: LCP+CLS GO, LongTask+EventTiming KILL, parse-once, set=`'loading'` | 5.4.0 |
 | 6 | WS10 perf insights | 1–1.5 | ≥1 insight in every SURVIVING class via live emulate slow3g | 5.4.0 |
 | 7 | WS11 heap dump + summary | 1 | summary matches rig ground truth (count evaluated pre-dump) | 5.4.0 |
 | 8 | WS12 slack/catch-up | 0.25 | bounded-retry GO/re-KILL, else empty | 5.4.0 |
@@ -604,17 +635,18 @@ halves' release rows).
 - npm rename (if declined) — decision record filed, no work item.
 - Heap live-diff browser-side (as opposed to offline) — noted-idea,
   not planned.
-- **Pre-poised 5.4 probe rows — flip state at WS10 close-out, whatever
-  the probe outcome** (momus T1-6):
-  - LongTask/RunTask insight class — CONDITIONAL-KILL: B-cache absent
-    in every `'loading'`-era combo; the WS10 probe decides. If KILL:
-    verb = "revalidate on Brave ships the events" (+ record the probe
-    JSON). If GO: delete this row.
-  - EventTiming/INP interaction-delay class — CONDITIONAL-KILL: only
-    surfaced with `'v8'` (volume risk unproven until the probe). If
-    KILL after the WS12 retry: verb = "one retry spent — revalidate
-    with the incremental aggregator if user data shows demand". If GO
-    at probe or WS12: delete this row.
+- **5.4 probe rows — flipped at WS10 close-out (2026-10-30), per PROBE
+  RESULT**:
+  - LongTask/RunTask insight class — **KILLED** (momus T2-7 verb:
+    "revalidate when a Chromium build ships perf events the probe could
+    capture — both days exhausted every category combo; rig ground
+    truth proves the tasks RAN but the trace never carried them").
+  - EventTiming/INP interaction-delay class — **KILLED once, with one
+    recorded exemption:** B1-day ×32 under `[devtools.timeline, v8]` vs
+    zero across 3 configs on the re-run. WS12 may spend the ONE bounded
+    retry (needs a real user click on the rig; maintainer-driven, see
+    WS12 row). If the retry also fails → verb: "revalidate only when a
+    future workstream rigs real input tests."
   - `heap_diff` (if trimmed) — verb: "implement as a follow-on once two
     real dumps exist to diff."
   - Raw-trace file dump (if trimmed) — verb: "follow-on behind demand;
