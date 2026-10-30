@@ -26,8 +26,11 @@ const SECRET_KEY = /(password|passwd|secret|token|authorization|auth|key|credent
 const JSON_PAIR = /("[^"]*"\s*:\s*")([^"\\]*)(")/g;
 /** Authorization-style headers: mask the ENTIRE line value (Bearer x.y.z etc.). */
 const AUTH_HEADER = /((?:authorization|proxy-authorization)\s*:\s*)([^\r\n]+)/gi;
-/** Plain pair: Authorization: Bearer xyz / apiKey=abc / token: abc. */
-const PLAIN_PAIR = /([A-Za-z_][A-Za-z0-9_-]*)(\s*[:=]\s*)([^\s"',;&}\]]+)/g;
+/** Plain pair: Authorization: Bearer xyz / apiKey=abc / token: abc.
+ *  WS10: '?', '&' and '#' also terminate the value so tokens embedded in
+ *  URLs (…?token=secret&…) are re-scanned as their own pair and masked
+ *  instead of being swallowed by a preceding key's "value" span. */
+const PLAIN_PAIR = /([A-Za-z_][A-Za-z0-9_-]*)(\s*[:=]\s*)([^\s"',;&?#}\]]+)/g;
 
 const MASK = '***';
 

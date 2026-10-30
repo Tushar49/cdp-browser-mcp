@@ -43,6 +43,7 @@ import { preprocessToolCall } from './tools/dispatch.js';
 import { defineTool, success } from './tools/base-tool.js';
 import { listTools } from './tools/list-tools.js';
 import { applyWebMcpEvent, clearWebMcpState } from './tools/webmcp.js';
+import { appendTraceChunk } from './utils/trace-insights.js';
 import { ActionableError, wrapError } from './utils/error-handler.js';
 import type { ServerContext, FileChooserHandler } from './types.js';
 
@@ -287,6 +288,40 @@ function wireEventPipeline(serverCtx: ServerContext): void {
         const reqId = params.requestId as string;
         if (reqs?.has(reqId)) {
           reqs.get(reqId)!.size = params.encodedDataLength as number;
+        }
+        break;
+      }
+
+      // ── Performance trace recordings (observe perf_start/perf_stop, 5.4 WS10) ──
+      // Synchronous append in the dispatch path — the append-discipline
+      // contract (chunk k completes before k+1). No recording entry = no-op,
+      // so passive Tracing events cost nothing.
+      case 'Tracing.dataCollected': {
+        const rec = serverCtx.perfTraces.get(sessionId);
+        if (rec) appendTraceChunk(rec, params.value);
+        break;
+      }
+
+      case 'Tracing.tracingComplete': {
+        const rec = serverCtx.perfTraces.get(sessionId);
+        if (rec) {
+          rec.completed = true;
+          rec.dataLoss = Boolean(params.dataLossOccurred);
+        }
+        break;
+      }
+
+      // Session death prunes in-flight perf recordings (5.2 cleanup-law
+      // shape: per-tab state dies with the session — the browser drops
+      // tracing on detach, so there is nothing left to best-effort-end).
+      case 'Inspector.detached': {
+        serverCtx.perfTraces.delete(sessionId);
+        break;
+      }
+
+      case 'Target.detachedFromTarget': {
+        if (typeof params.sessionId === 'string') {
+          serverCtx.perfTraces.delete(params.sessionId);
         }
         break;
       }
@@ -548,6 +583,7 @@ const ctx: ServerContext = {
   pendingFileChoosers: new Map(),
   pausedTabs: new Map(),
   pendingFetchRequests: new Map(),
+  perfTraces: new Map(),
   webmcpTools: new Map(),
   webmcpInvocations: new Map(),
 };

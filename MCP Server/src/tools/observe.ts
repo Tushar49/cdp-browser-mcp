@@ -8,6 +8,7 @@
 import type { ToolRegistry } from './registry.js';
 import type { ServerContext, ToolResult, NetworkRequestEntry, DownloadEntry } from '../types.js';
 import { TempFileManager } from '../utils/temp-files.js';
+import { createPerfTraceRecording, aggregateTraceInsights } from '../utils/trace-insights.js';
 import { isMethodMissingError } from '../connection/capabilities.js';
 import { join } from 'path';
 import { defineTool } from './base-tool.js';
@@ -347,6 +348,92 @@ async function handleMemory(
     throw err;
   }
 }
+/**
+ * WS10 perf_start: begin a Tracing recording with the probe-PROVEN category
+ * set (single 'loading' — captures LCP candidates + LayoutShift with full
+ * field shapes on capable builds). Returns immediately; chunks accumulate
+ * in ctx.perfTraces via the event pipeline until perf_stop.
+ */
+async function handlePerfStart(
+  ctx: ServerContext,
+  params: Record<string, unknown>,
+): Promise<ToolResult> {
+  const sess = params._sessionId as string;
+
+  const existing = ctx.perfTraces.get(sess);
+  if (existing) {
+    return fail(existing.stopping
+      ? `A previous performance recording on this tab is still finishing (started at ${new Date(existing.startedAt).toLocaleTimeString()}). Retry perf_start shortly.`
+      : `Performance recording already in progress for this tab (started at ${new Date(existing.startedAt).toLocaleTimeString()}). Call observe perf_stop to finish it first — starting a second trace would discard the first.`);
+  }
+
+  // Best-effort URL baseline (bounded — never blocks the start)
+  let url: string | null = null;
+  const href = await raceBounded(
+    ctx.sendCommand('Runtime.evaluate', { expression: 'location.href', returnByValue: true }, sess),
+    2000,
+  );
+  if (href.ok) {
+    const v = (href.value as { result?: { value?: unknown } })?.result?.value;
+    if (typeof v === 'string') url = v;
+  }
+
+  await ctx.sendCommand('Tracing.start', {
+    traceConfig: {
+      recordMode: 'recordAsMuchAsPossible',
+      includedCategories: ['loading'],
+    },
+  }, sess);
+  ctx.perfTraces.set(sess, createPerfTraceRecording(Date.now(), url));
+
+  return ok('Performance recording started (category: loading). Navigate or let the page render, then call observe perf_stop on this tab to extract insights (LCP, CLS). Capture quality depends on the page rendering during the recording.');
+}
+
+/**
+ * WS10 perf_stop: end the recording, wait (bounded) for tracingComplete,
+ * aggregate the accumulated chunks into token-capped insights, and discard
+ * the raw events. No per-session state survives the stop.
+ */
+async function handlePerfStop(
+  ctx: ServerContext,
+  params: Record<string, unknown>,
+): Promise<ToolResult> {
+  const sess = params._sessionId as string;
+  const rec = ctx.perfTraces.get(sess);
+  if (!rec) {
+    return fail('No performance recording active for this tab. Call observe perf_start first.');
+  }
+  if (rec.stopping) {
+    return fail('A perf_stop is already finishing on this tab. Retry in a moment.');
+  }
+  rec.stopping = true;
+
+  try {
+    await ctx.sendCommand('Tracing.end', {}, sess);
+  } catch (err: unknown) {
+    // Session died between start and stop — recording is unrecoverable.
+    ctx.perfTraces.delete(sess);
+    return fail(`Performance recording lost — the session ended before the trace could be stopped (${(err as Error).message}). Restart: observe perf_start.`);
+  }
+
+  // Bounded wait for Tracing.tracingComplete from the event pipeline (15s)
+  const deadline = Date.now() + 15_000;
+  while (!rec.completed && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  ctx.perfTraces.delete(sess);
+  const insight = aggregateTraceInsights(rec.events, {
+    url: rec.url,
+    startedAt: rec.startedAt,
+    stoppedAt: Date.now(),
+    dataLoss: rec.dataLoss,
+    truncated: rec.truncated,
+    completed: rec.completed,
+  });
+  return ok(insight.output);
+}
+
 async function handleDownloads(
   ctx: ServerContext,
   params: Record<string, unknown>,
@@ -376,8 +463,7 @@ async function handleDownloads(
 async function handleHar(
   ctx: ServerContext,
   params: Record<string, unknown>,
-): Promise<ToolResult> {
-  const sess = params._sessionId as string;
+): Promise<ToolResult> {  const sess = params._sessionId as string;
   await ctx.sendCommand('Network.enable', {}, sess);
 
   // Requests from runtime integration layer
@@ -444,6 +530,8 @@ export function registerObserveTools(
         '- network: List captured network requests with URLs, methods, status codes, and timing (requires: tabId; optional: filter — URL substring, types — resource type filter array, last, clear)',
         '- request: Get the full request and response body for a specific network request (requires: tabId; provide either requestId — from network listing — or urlFilter — substring of the URL; urlFilter resolves to the most recent matching request)',
         '- performance: Collect page performance metrics including DOM size, JS heap, layout counts, and paint timing (requires: tabId)',
+        '- perf_start: Begin recording page rendering performance via CDP Tracing (LCP candidates + layout shifts). Returns immediately. Call observe perf_stop on the same tab to finish and extract insights. Capture quality depends on the page rendering during the recording (requires: tabId)',
+        '- perf_stop: Stop the recording started by perf_start on this tab and aggregate it into token-capped insights: LCP (last candidate per frame) and CLS (final cumulative score, input shifts excluded). If the session died mid-recording, the stop reports the recording as lost (requires: tabId)',
         '- memory: DOM/JS memory counters (documents, nodes, JS event listeners) before/after a forced GC sweep via Memory.prepareForLeakDetection, plus leak-detection counters when supported (requires: tabId)',
         '- downloads: List tracked file downloads with progress info (requires: tabId; optional: last, clear)',
         '- har: Export captured network requests as HAR 1.2 JSON (requires: tabId)',
@@ -458,7 +546,7 @@ export function registerObserveTools(
       inputSchema: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['console', 'network', 'request', 'performance', 'memory', 'downloads', 'har'], description: 'Observe action.' },
+          action: { type: 'string', enum: ['console', 'network', 'request', 'performance', 'perf_start', 'perf_stop', 'memory', 'downloads', 'har'], description: 'Observe action.' },
           tabId: { type: 'string', description: 'Tab ID.' },
           level: { type: 'string', enum: ['all', 'error', 'warning', 'log', 'info', 'debug'], description: 'Console level filter.' },
           filter: { type: 'string', description: 'Network URL filter.' },
@@ -480,10 +568,12 @@ export function registerObserveTools(
           case 'network':     return handleNetwork(ctx, params);
           case 'request':     return handleRequest(ctx, params);
           case 'performance': return handlePerformance(ctx, params);
-          case 'memory':      return handleMemory(ctx, params);
-          case 'downloads':   return handleDownloads(ctx, params);
-          case 'har':         return handleHar(ctx, params);
-          default:            return fail(`Unknown observe action: "${action}". Use: console, network, request, performance, memory, downloads, har`);
+          case 'perf_start': return handlePerfStart(ctx, params);
+          case 'perf_stop':  return handlePerfStop(ctx, params);
+          case 'memory':     return handleMemory(ctx, params);
+          case 'downloads':  return handleDownloads(ctx, params);
+          case 'har':        return handleHar(ctx, params);
+          default:            return fail(`Unknown observe action: "${action}". Use: console, network, request, performance, perf_start, perf_stop, memory, downloads, har`);
         }
       },
     }),

@@ -2,6 +2,14 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
+## [5.4.0] - UNRELEASED
+
+### Added
+- **observe `perf_start` / `perf_stop` (WS10)** — render-performance recording via CDP `Tracing` with the probe-proven single `'loading'` category set (recordAsMuchAsPossible): `perf_start` begins recording immediately and returns; `perf_stop` ends it (bounded tracingComplete wait, 15s) and aggregates the accumulated chunks into a token-capped insight set: **LCP** (last candidate per frame: ms from trace start, element hint, size) and **CLS** (final cumulative score among input-excluded shifts + worst single step, labelled approx — trace shift events carry the browser's cumulative session score, so summing cumulatives would double-count; page-side parity with the rig's `clsTotal`). State contracts: double `perf_start` fails with state (echoes the original start time, never silently discards a running trace); a session death between start and stop makes `perf_stop` report the recording **lost** with an actionable restart hint and prunes the entry; session detach prunes in-flight recordings; concurrent recording in two tabs is safe (per-target sessions). Honest header: `dataLossOccurred`, trace-completeness timeout, and the 50k-event cap truncation all surface in the output. Live probe evidence (Brave 153): `LongTask` events never surfaced on any category set despite page-side ground truth proving the busy tasks ran (KILL verdict — scheduler-generic `RunTask` flood carries no usable long-task semantics), and `EventTiming` is input-dependent and non-reproducible across configs (KILL) — both remains go to the 5.5 carcass.
+
+### Fixed
+- **Scrubber missed tokens embedded in URLs** — the WS1 secrets scrubber's `PLAIN_PAIR` value class did not break at `?`/`&`/`#`, so a preceding `key:` consumed the whole span and a secret pair inside a URL value (`recording: https://site?token=secret`) was never re-scanned or masked. Caught by the WS10 decision-pin matrix test (perf output is default-scrubbed, no opt-out — trace insights are untrusted page data).
+
 ## [5.3.5] - 2026-10-30
 
 ### Added
