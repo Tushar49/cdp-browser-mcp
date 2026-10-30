@@ -1,0 +1,5 @@
+{
+  "at": "2026-10-30T06:32:12.019Z",
+  "dumpOut": "Heap dump complete: A:\\.devTools\\cache\\temp\\opencode\\.temp\\508782FF_heap-1793341931502.heapsnapshot\nsize: 9.1MB | snapshot live-tested: parsed offline by observe heap_summary (path param above).\nLifecycle: the file stays until cleanup clean_temp removes it — nothing auto-deletes user disk state.\nPrivacy note: heap dumps can carry auth-state material from page JS (cookies, tokens in closures). Handle the file accordingly.",
+  "dumpPath": "A:\\.devTools\\cache\\temp\\opencode\\.temp\\508782FF_heap-1793341931502.heapsnapshot"
+}

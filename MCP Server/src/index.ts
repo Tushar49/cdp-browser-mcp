@@ -316,13 +316,37 @@ function wireEventPipeline(serverCtx: ServerContext): void {
       // tracing on detach, so there is nothing left to best-effort-end).
       case 'Inspector.detached': {
         serverCtx.perfTraces.delete(sessionId);
+        const hd = serverCtx.heapDumps.get(sessionId);
+        if (hd) { try { hd.writer.abandon(); } catch { } serverCtx.heapDumps.delete(sessionId); }
         break;
       }
 
       case 'Target.detachedFromTarget': {
         if (typeof params.sessionId === 'string') {
           serverCtx.perfTraces.delete(params.sessionId);
+          const hd = serverCtx.heapDumps.get(params.sessionId);
+          if (hd) { try { hd.writer.abandon(); } catch { } serverCtx.heapDumps.delete(params.sessionId); }
         }
+        break;
+      }
+
+      // ── Heap dump streaming (observe heap_dump, 5.4 WS11) ──
+      // Synchronous append in the dispatch path — the append-discipline
+      // contract: chunks flow to the .partial temp file, which is renamed
+      // (never advertised complete early) only after takeHeapSnapshot resolves.
+      case 'HeapProfiler.addHeapSnapshotChunk': {
+        const dump = serverCtx.heapDumps.get(sessionId);
+        if (dump) {
+          try {
+            dump.writer.write(String(params.chunk ?? ''));
+          } catch { /* cap-abort: the dump errors out at finalize time */ }
+        }
+        break;
+      }
+
+      case 'HeapProfiler.reportHeapSnapshotProgress': {
+        const dump = serverCtx.heapDumps.get(sessionId);
+        if (dump && params.finished === true) dump.finished = true;
         break;
       }
 
@@ -584,6 +608,7 @@ const ctx: ServerContext = {
   pausedTabs: new Map(),
   pendingFetchRequests: new Map(),
   perfTraces: new Map(),
+  heapDumps: new Map(),
   webmcpTools: new Map(),
   webmcpInvocations: new Map(),
 };

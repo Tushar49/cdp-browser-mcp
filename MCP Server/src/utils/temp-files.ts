@@ -7,12 +7,16 @@
  */
 
 import {
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readdirSync,
+  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from 'fs';
 import { join } from 'path';
 
@@ -95,7 +99,28 @@ export class TempFileManager {
     return count;
   }
 
-  // ── private ─────────────────────────────────────────────────────
+  /**
+   * Open a STREAMING append writer into the temp directory (5.4 WS11).
+   *
+   * fd held open for the stream's lifetime (never per-chunk writeFileSync —
+   * O(file)); appends are synchronous and single-writer (chunk k completes
+   * before k+1 starts). Bytes flow to `<name>.partial` — the file is NEVER
+   * advertised as complete until `finalize()` renames it; `abandon()` keeps
+   * the `.partial` orphan (discoverable by `clean_temp`, never auto-deleted).
+   * A hard size cap (`maxBytes`, default 500MB) aborts with an actionable
+   * error rather than filling the user's disk.
+   */
+  openStreamWriter(
+    name: string,
+    opts: { sessionPrefix?: string; maxBytes?: number } = {},
+  ): TempStreamWriter {
+    this.ensureDir();
+    this.autoCleanup();
+    const fileName = opts.sessionPrefix
+      ? `${opts.sessionPrefix.substring(0, 8)}_${name}`
+      : name;
+    return new TempStreamWriter(join(this.tempDir, fileName), opts.maxBytes ?? 500 * 1024 * 1024);
+  }
 
   /**
    * When the file count exceeds `maxFiles`, remove the oldest files
@@ -133,5 +158,64 @@ export class TempFileManager {
         /* best-effort */
       }
     }
+  }
+}
+
+/**
+ * Streaming append writer for chunked artifacts (heap snapshots, raw traces).
+ * fd held open across appends — never a per-chunk writeFileSync (O(file)).
+ * The single-writer discipline lives in the caller: append synchronously in
+ * the event-dispatch path, chunk k completing before k+1 starts.
+ */
+export class TempStreamWriter {
+  readonly partialPath: string;
+  private fd: number;
+  private bytes = 0;
+  private closed = false;
+
+  constructor(
+    readonly finalPath: string,
+    private readonly maxBytes: number,
+  ) {
+    this.partialPath = `${finalPath}.partial`;
+    this.fd = openSync(this.partialPath, 'a');
+  }
+
+  /** Current bytes appended. */
+  get byteCount(): number {
+    return this.bytes;
+  }
+
+  /**
+   * Append one chunk synchronously. Throws ACTIONABLY on cap overrun — the
+   * .partial orphan remains on disk (clean_temp discovers it).
+   */
+  write(chunk: string | Buffer): void {
+    if (this.closed) throw new Error('TempStreamWriter is closed');
+    const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk;
+    if (this.bytes + buf.length > this.maxBytes) {
+      throw new Error(`Temp-file size cap reached (${(this.maxBytes / 1048576).toFixed(0)}MB) — aborting the artifact; it stays on disk as a *.partial file (clean_temp removes it).`);
+    }
+    writeSync(this.fd, buf);
+    this.bytes += buf.length;
+  }
+
+  /** Close + atomically rename *.partial → the final path; returns it. */
+  finalize(): string {
+    if (this.closed) return this.finalPath;
+    closeSync(this.fd);
+    this.closed = true;
+    renameSync(this.partialPath, this.finalPath);
+    return this.finalPath;
+  }
+
+  /**
+   * Close and KEEP the *.partial orphan on disk (never advertised complete).
+   * Idempotent; call on errors or session death.
+   */
+  abandon(): void {
+    if (this.closed) return;
+    closeSync(this.fd);
+    this.closed = true;
   }
 }

@@ -49,7 +49,9 @@ describe('observe WS10 — perf_start / perf_stop wiring', () => {
     const acts = tool.inputSchema.properties.action.enum as string[];
     expect(acts).toContain('perf_start');
     expect(acts).toContain('perf_stop');
-    expect(acts).toHaveLength(9);
+    expect(acts).toContain('heap_dump');
+    expect(acts).toContain('heap_summary');
+    expect(acts).toHaveLength(11);
   });
 
   it('description documents the new operations', () => {
@@ -58,12 +60,12 @@ describe('observe WS10 — perf_start / perf_stop wiring', () => {
     expect(tool.description).toContain('- perf_stop: Stop the recording started by perf_start');
   });
 
-  it('dispatch-fail string enumerates all 9 actions (sweep second source)', async () => {
+  it('dispatch-fail string enumerates all 11 actions (sweep second source)', async () => {
     const { ctx } = makeCtx();
     const res = await registry.dispatch('observe', args({ action: 'banana' }), ctx);
     const text = textOf(res);
     expect(text).toContain('Unknown observe action: "banana"');
-    expect(text).toContain('console, network, request, performance, perf_start, perf_stop, memory, downloads, har');
+    expect(text).toContain('console, network, request, performance, perf_start, perf_stop, heap_dump, heap_summary, memory, downloads, har');
   });
 
   it('happy path: start records, stop aggregates LCP + CLS from synthetic chunks', async () => {

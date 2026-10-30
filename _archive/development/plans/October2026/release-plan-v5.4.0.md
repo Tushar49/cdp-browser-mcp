@@ -581,10 +581,11 @@ exit via GO/KILL before any draft — they trim NOTHING (they get
 §5.5 carcass verbs instead). Flagship + heap core + sweep never trim;
 WS12 is the buffer.
 
-**Dialog budget (revised at probe close): 4 total** — probes consumed 2
-(b3 + b4 self-diagnosing rerun), gates need 2 (WS10 + WS11, one CDP
-connection each; serve.mjs is plain HTTP; zero on flag mode). Still
-well under 5.3.5's canary churn.
+**Dialog budget (FINAL for the cycle so far): probes 2 + WS10 gate
+attempts 5 + WS11 gate 1 = 8** (the original 3-dialog estimate was
+rewritten twice: budget line 4 at probe close, blown by the WS10
+flush-nondeterminism hunt; WS11 was first-try). Recorded for the
+close-out self-audit — 5.3.5's canary churn was comparable.
 
 ## Sequencing (sequenced ties + gates)
 
@@ -596,7 +597,7 @@ well under 5.3.5's canary churn.
 | 4 | WS4 rerun + npm decision + 5.3.5 sweep + release | 0.5 | sweep table empty, pipeline green | 5.3.5 |
 | 5 | WS10 probe (standalone, step zero) | 0.25 | **DONE 2026-10-30** — RESULT block recorded: LCP+CLS GO, LongTask+EventTiming KILL, parse-once, set=`'loading'` | 5.4.0 |
 | 6 | WS10 perf insights | 1–1.5 | **GATE PASS 2026-10-30** — LCP (552ms, rig H1) + 4 shifts recorded via live slow3g + `['loading']` through the tool path; second-stop contract PASS; class capture is run-nondeterministic (see PROBE RESULT addendum) | 5.4.0 |
-| 7 | WS11 heap dump + summary | 1 | summary matches rig ground truth (count evaluated pre-dump) | 5.4.0 |
+| 7 | WS11 heap dump + summary | 1 | **GATE PASS 2026-10-30** — ground-truth `HeapGateMarker ×421` exact in the offline summary of the live 9.1MB rig dump (86,543 nodes / 385k edges); opt-in gate + streaming finalize + honest header all PASS | 5.4.0 |
 | 8 | WS12 slack/catch-up | 0.25 | bounded-retry GO/re-KILL, else empty | 5.4.0 |
 | 9 | 5.4.0 sweep + release | 0.5 | sweep table empty, pipeline green | 5.4.0 |
 
@@ -606,7 +607,11 @@ re-located probe). **Entering 5.4.0 baseline = 504 green (re-derived at WS10 sta
 WS10 delta actual = +18 (planned +9–10: three extra from the categories
 override contract, the dispatch-fail double-source pin, and the
 scrubber URL-token matrix that turned into a real Fixed entry —
-504 → 522). WS11 +6 → expect ≈ 528.** (5.3.5 actuals: 479 → 504 = +25 vs planned +16.) Plus
+504 → 522). WS11 delta actual = +11 (planned +6 — the streaming-append
+temp-writer contracts grew beyond the parser fixtures: append
+discipline, .partial lifecycle, cap-abort, shuffled-fields resolver,
+500k-row streaming fixture, wiring batch) → **533 green at the WS11
+close**. WS12 + bounded-retry delta TBD (0 if empty). (5.3.5 actuals: 479 → 504 = +25 vs planned +16.) Plus
 0.25–0.5 live-fix buffer (4 in-cycle fixes in 5.2, webmcp round-trip
 shape in 5.3, scrubber/`_noScrub` in 5.3.5). Self-audit line required
 at close-out: table sum vs stated totals, per half, plus where the
@@ -634,7 +639,7 @@ call.
 | overrideNetworkState | onLine spoof reflects in-rig | validation |
 | CHIPS | partitioned cookie survives export→import identically | +6 normalize/passthrough/round-trip |
 | perf insights | rig under live slow3g (via `emulate`) → gate PASS: LCP + shifts through the `['loading']` tool path (emission nondeterminism recorded) | +18 fixtures (state contracts, categories override, token=X scrub matrix, aggregation semantics) |
-| heap dump/summary | dump rig → offline ground-truth count matches (evaluated pre-dump) | +6 synthetic fixture + append-discipline/.partial + streaming |
+| heap dump/summary | dump rig → **GATE PASS** — exact ground-truth ×421 (count evaluated pre-dump; retained in `window.__HEAP_KEEP`) | +11 fixtures (append-discipline, .partial, cap, shuffled-fields resolver, 500k-row streaming, wiring) |
 | WS4 rerun | 3 re-assertions on the maintainer's running CDP Brave (Bitwarden stands; caveat re-declaration rule) | existing 5.3 battery unchanged |
 | Regression | flag+toggle connect unchanged; slim mode unaffected; baseline+ΣN green | existing suite |
 

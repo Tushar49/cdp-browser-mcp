@@ -18,6 +18,14 @@ import type { WebAuthnStateManager } from './session/webauthn-state.js';
 import type { SnapshotCache } from './snapshot/cache.js';
 import type { ElementResolver } from './snapshot/element-resolver.js';
 import type { PerfTraceRecording } from './utils/trace-insights.js';
+import type { TempStreamWriter } from './utils/temp-files.js';
+
+/** In-flight heap dump streaming state (observe heap_dump — 5.4 WS11). */
+export interface HeapDumpState {
+  writer: TempStreamWriter;
+  startedAt: number;
+  finished: boolean;
+}
 
 // ─── Cleanup Strategy ───────────────────────────────────────────────
 
@@ -375,6 +383,13 @@ export interface ServerContext {
    * tracingComplete and consumed by observe perf_stop (5.4 WS10).
    */
   perfTraces: Map<string, PerfTraceRecording>;
+
+  /**
+   * Per-session in-flight heap dumps (sessionId → dump state), streamed by
+   * the event pipeline from HeapProfiler.addHeapSnapshotChunk to a
+   * .partial temp file; observe heap_dump finalizes or abandons (5.4 WS11).
+   */
+  heapDumps: Map<string, HeapDumpState>;
 
   /**
    * WebMCP page-registered tool registry (CDP sessionId → toolName → info),
