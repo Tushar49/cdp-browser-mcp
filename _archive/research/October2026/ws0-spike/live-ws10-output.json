@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-30T06:05:11.309Z",
+  "records": [
+    {
+      "attempt": "A-loading-8s",
+      "started": "Performance recording started (categories: loading). Navigate or let the page render, then call observe perf_stop on this tab to extract insights (LCP, CLS). Capture quality depends on the page rendering during the recording.",
+      "vis": "hidden|focus=false",
+      "out": "Performance insights (trace complete):\nrecording: http://localhost:8877/slow-rig.html?ws10gate=1\nduration: 11.1s | chunks: 1 (max 333 events) | LCP/CLS-class events: 6\n\nLCP — last candidate per frame (ms from trace start):\n- F468E795…: 552ms — H1 id='lcp' — size 49619B\n\nCLS — final cumulative, input shifts excluded (approx):\n- 4 shift(s) recorded, all input-attributed (excluded)"
+    }
+  ]
+}

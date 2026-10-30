@@ -350,9 +350,13 @@ async function handleMemory(
 }
 /**
  * WS10 perf_start: begin a Tracing recording with the probe-PROVEN category
- * set (single 'loading' — captures LCP candidates + LayoutShift with full
- * field shapes on capable builds). Returns immediately; chunks accumulate
+ * set (default: single 'loading' — captures LCP candidates + LayoutShift with
+ * full field shapes on capable builds). Returns immediately; chunks accumulate
  * in ctx.perfTraces via the event pipeline until perf_stop.
+ *
+ * `categories` override (REstricted): ['v8'] appends 'v8' to the set — the
+ * escalation the WS10 gate proves in-place; recording deltas documented in
+ * the plan's PROBE RESULT. Any other category value fails actionably.
  */
 async function handlePerfStart(
   ctx: ServerContext,
@@ -365,6 +369,19 @@ async function handlePerfStart(
     return fail(existing.stopping
       ? `A previous performance recording on this tab is still finishing (started at ${new Date(existing.startedAt).toLocaleTimeString()}). Retry perf_start shortly.`
       : `Performance recording already in progress for this tab (started at ${new Date(existing.startedAt).toLocaleTimeString()}). Call observe perf_stop to finish it first — starting a second trace would discard the first.`);
+  }
+
+  const categories = params.categories as string[] | string | undefined;
+  let included: string[];
+  if (categories === undefined) {
+    included = ['loading'];
+  } else {
+    const want = Array.isArray(categories) ? categories : [categories];
+    const invalid = want.filter((c) => c !== 'v8');
+    if (invalid.length > 0) {
+      return fail(`perf_start categories: unsupported value(s) '${invalid.join("', '")}'. Only 'v8' is accepted (appended to the default 'loading' set).`);
+    }
+    included = ['loading', 'v8'];
   }
 
   // Best-effort URL baseline (bounded — never blocks the start)
@@ -381,12 +398,12 @@ async function handlePerfStart(
   await ctx.sendCommand('Tracing.start', {
     traceConfig: {
       recordMode: 'recordAsMuchAsPossible',
-      includedCategories: ['loading'],
+      includedCategories: included,
     },
   }, sess);
   ctx.perfTraces.set(sess, createPerfTraceRecording(Date.now(), url));
 
-  return ok('Performance recording started (category: loading). Navigate or let the page render, then call observe perf_stop on this tab to extract insights (LCP, CLS). Capture quality depends on the page rendering during the recording.');
+  return ok(`Performance recording started (categories: ${included.join('+')}). Navigate or let the page render, then call observe perf_stop on this tab to extract insights (LCP, CLS). Capture quality depends on the page rendering during the recording.`);
 }
 
 /**
@@ -430,6 +447,9 @@ async function handlePerfStop(
     dataLoss: rec.dataLoss,
     truncated: rec.truncated,
     completed: rec.completed,
+    chunkCount: rec.chunkCount,
+    maxChunkEvents: rec.maxChunkEvents,
+    sampleNames: rec.sampleNames,
   });
   return ok(insight.output);
 }
@@ -530,7 +550,7 @@ export function registerObserveTools(
         '- network: List captured network requests with URLs, methods, status codes, and timing (requires: tabId; optional: filter — URL substring, types — resource type filter array, last, clear)',
         '- request: Get the full request and response body for a specific network request (requires: tabId; provide either requestId — from network listing — or urlFilter — substring of the URL; urlFilter resolves to the most recent matching request)',
         '- performance: Collect page performance metrics including DOM size, JS heap, layout counts, and paint timing (requires: tabId)',
-        '- perf_start: Begin recording page rendering performance via CDP Tracing (LCP candidates + layout shifts). Returns immediately. Call observe perf_stop on the same tab to finish and extract insights. Capture quality depends on the page rendering during the recording (requires: tabId)',
+        '- perf_start: Begin recording page rendering performance via CDP Tracing (LCP candidates + layout shifts). Returns immediately. Call observe perf_stop on the same tab to finish and extract insights. Capture quality depends on the page rendering during the recording; per-frame paint-metric emission to the trace is nondeterministic between runs on some browsers — a zero-class result can succeed on a retry (requires: tabId; optional: categories — ["v8"] appends the v8 category set to the default loading-only set; other values are rejected)',
         '- perf_stop: Stop the recording started by perf_start on this tab and aggregate it into token-capped insights: LCP (last candidate per frame) and CLS (final cumulative score, input shifts excluded). If the session died mid-recording, the stop reports the recording as lost (requires: tabId)',
         '- memory: DOM/JS memory counters (documents, nodes, JS event listeners) before/after a forced GC sweep via Memory.prepareForLeakDetection, plus leak-detection counters when supported (requires: tabId)',
         '- downloads: List tracked file downloads with progress info (requires: tabId; optional: last, clear)',
@@ -557,6 +577,7 @@ export function registerObserveTools(
           urlFilter: { type: 'string', description: 'URL substring to look up the most recent matching request body without first calling network. Parity with Playwright MCP browser_network_requests inline-body return.' },
           sessionId: { type: 'string', description: 'Agent session ID for tab ownership and isolation. Tabs are locked to sessions. Default: per-process UUID.' },
           cleanupStrategy: { type: 'string', enum: ['close', 'detach', 'none'], description: "Tab cleanup on session expiry. 'detach' (default) keeps tabs open, 'close' removes them, 'none' skips cleanup. Sticky per session." },
+          categories: { type: 'array', items: { type: 'string' }, description: "perf_start only: category-set override; accepted value(s): ['v8'] (appends v8 to the default 'loading' set). Other values are rejected." },
           exclusive: { type: 'boolean', description: 'Lock tab to this session (default: true). Set false to allow shared access.' },
         },
         required: ['action'],

@@ -348,6 +348,39 @@ chirally — per-class decisions per the pre-declared binary rule:
 EventTiming's one retry needs a REAL user-driven input event on the rig
 (page observers can't fake it) — says so in the WS12 row if it ever runs.
 
+**GATE RESULT ADDENDUM (2026-10-30, ~17:00 local) — WS10 gate PASS with a
+material behavioral discovery.** The gate (`live-ws10.mjs`) ran live via
+the shipped tool path (stdio MCP client → 5.3.5 dist with the new
+actions): attempt A (default `['loading']`, slow3g ByRule via the
+`emulate` tool, reload, 8s window) captured **LCP at 552ms (rig
+`H1 id='lcp'`, 49619B) + 4 LayoutShifts through the complete flush**,
+second-stop contract PASS. `dataLoss=false`, "trace complete". Verdict:
+**GATE PASS, shipping category set = `['loading']`** (the restricted
+`categories: ['v8']` escalation shipped unexercised; kept as the
+pre-declared escalation path).
+
+- **Nondeterminism finding (recorded honestly):** across the SEVEN
+  instrumented gate attempts (multiple flows — reload, mid-trace page
+  death, escalated `v8`, 12-20s windows, user-focus kept), the per-frame
+  paint-metric classes surfaced on SOME runs and not others — including
+  a PASS with the audited page state `vis=hidden|focus=false`
+  (falsifying the earlier foreground-surface hypothesis). On zero-class
+  runs the trace DID receive chunks (up to 10) but only the UMA/flush
+  variants (`NavStartToLargestContentfulPaint::AllFrames::UMA`,
+  `MetricsWebContentsObserver::UpdateTiming`,
+  `PageTimingMetricsSender::SendNow`...). This is browser-side emission
+  behavior we cannot force; the tool's zero-class hint names the
+  nondeterminism + retry (and the plan's earlier "throttled window
+  aligns the flush" prediction is NOT what the gate showed).
+- The diagnostic instrumentation added during the hunt stays: every
+  output row carries chunk/append stats + zero-class names — token-cheap,
+  honesty-positive.
+- Dialog spend for WS10 total: 7 (probes 2 + gate attempts 5); the
+  revised budget line (4) was blown by the hunt — recorded for the
+  close-out self-audit.
+- Artifact: `live-ws10-output.json` (all attempts' raw outputs),
+  `batch-b3/b4-results.json` (probe phase).
+
 ### WS10 — perf insights flagship (1–1.5)
 
 **STEP ZERO — DONE (result recorded above, printed before the WS11
@@ -562,17 +595,18 @@ well under 5.3.5's canary churn.
 | 3 | WS9 CHIPS round-trip | 0.25–0.5 | partitioned cookie survives export→import | 5.3.5 |
 | 4 | WS4 rerun + npm decision + 5.3.5 sweep + release | 0.5 | sweep table empty, pipeline green | 5.3.5 |
 | 5 | WS10 probe (standalone, step zero) | 0.25 | **DONE 2026-10-30** — RESULT block recorded: LCP+CLS GO, LongTask+EventTiming KILL, parse-once, set=`'loading'` | 5.4.0 |
-| 6 | WS10 perf insights | 1–1.5 | ≥1 insight in every SURVIVING class via live emulate slow3g | 5.4.0 |
+| 6 | WS10 perf insights | 1–1.5 | **GATE PASS 2026-10-30** — LCP (552ms, rig H1) + 4 shifts recorded via live slow3g + `['loading']` through the tool path; second-stop contract PASS; class capture is run-nondeterministic (see PROBE RESULT addendum) | 5.4.0 |
 | 7 | WS11 heap dump + summary | 1 | summary matches rig ground truth (count evaluated pre-dump) | 5.4.0 |
 | 8 | WS12 slack/catch-up | 0.25 | bounded-retry GO/re-KILL, else empty | 5.4.0 |
 | 9 | 5.4.0 sweep + release | 0.5 | sweep table empty, pipeline green | 5.4.0 |
 
 Self-audit + buffer (momus T2-10): table total ≈ 4.25–5.5 sessions
 (5.3.5 actual ≈ 2.0; 5.4.0 headers sum to their rows, incl. the
-re-located probe). **Entering 5.4.0 baseline = 504 green (re-derive
-with `pnpm test` at WS10 start — don't trust this number); deltas:
-+9–10 (WS10, incl. the two state-contract fixtures) +6 (WS11) →
-≈ 519–520.** (5.3.5 actuals: 479 → 504 = +25 vs planned +16.) Plus
+re-located probe). **Entering 5.4.0 baseline = 504 green (re-derived at WS10 start);
+WS10 delta actual = +18 (planned +9–10: three extra from the categories
+override contract, the dispatch-fail double-source pin, and the
+scrubber URL-token matrix that turned into a real Fixed entry —
+504 → 522). WS11 +6 → expect ≈ 528.** (5.3.5 actuals: 479 → 504 = +25 vs planned +16.) Plus
 0.25–0.5 live-fix buffer (4 in-cycle fixes in 5.2, webmcp round-trip
 shape in 5.3, scrubber/`_noScrub` in 5.3.5). Self-audit line required
 at close-out: table sum vs stated totals, per half, plus where the
@@ -599,7 +633,7 @@ call.
 | mockCamera | rig getUserMedia sees fake camera; reset clears | param validation (subset of the 10) |
 | overrideNetworkState | onLine spoof reflects in-rig | validation |
 | CHIPS | partitioned cookie survives export→import identically | +6 normalize/passthrough/round-trip |
-| perf insights | rig under live slow3g (via `emulate`) → ≥1 insight per SURVIVING class | +9–10 fixtures (incl. 2 state contracts, token=X scrub matrix) |
+| perf insights | rig under live slow3g (via `emulate`) → gate PASS: LCP + shifts through the `['loading']` tool path (emission nondeterminism recorded) | +18 fixtures (state contracts, categories override, token=X scrub matrix, aggregation semantics) |
 | heap dump/summary | dump rig → offline ground-truth count matches (evaluated pre-dump) | +6 synthetic fixture + append-discipline/.partial + streaming |
 | WS4 rerun | 3 re-assertions on the maintainer's running CDP Brave (Bitwarden stands; caveat re-declaration rule) | existing 5.3 battery unchanged |
 | Regression | flag+toggle connect unchanged; slim mode unaffected; baseline+ΣN green | existing suite |

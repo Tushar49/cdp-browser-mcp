@@ -123,6 +123,19 @@ describe('observe WS10 — perf_start / perf_stop wiring', () => {
     expect(perfTraces.has('sess1')).toBe(false);
   });
 
+  it('perf_start categories override: JS-appends v8 to the default set; anything else fails actionably', async () => {
+    const { ctx, send, perfTraces } = makeCtx();
+    await registry.dispatch('observe', args({ action: 'perf_start', categories: ['v8'] }), ctx);
+    const rule = send.mock.calls.find((c) => c[0] === 'Tracing.start')[1];
+    expect(rule.traceConfig.includedCategories).toEqual(['loading', 'v8']);
+
+    const bad = await registry.dispatch('observe', args({ action: 'perf_start', categories: ['banana'] }), ctx);
+    perfTraces.clear(); // drop the running recording so the guard doesn't shadow the validation error
+    const bad2 = await registry.dispatch('observe', args({ action: 'perf_start', categories: ['banana'] }), ctx);
+    expect(textOf(bad2)).toContain("Only 'v8' is accepted");
+    expect(send.mock.calls.filter((c) => c[0] === 'Tracing.start')).toHaveLength(1); // no second start emitted
+  });
+
   it('perf_stop without perf_start gives the established actionable error', async () => {
     const { ctx } = makeCtx();
     const res = await registry.dispatch('observe', args({ action: 'perf_stop' }), ctx);

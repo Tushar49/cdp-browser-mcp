@@ -37,6 +37,11 @@ export interface PerfTraceRecording {
   truncated: boolean;
   /** True between Tracing.end and aggregation completion. */
   stopping: boolean;
+  /** Diagnostics (honest-output contract): chunk arrival stats. */
+  chunkCount: number;
+  maxChunkEvents: number;
+  /** First few distinct event names seen, for zero-insight diagnoses. */
+  sampleNames: string[];
 }
 
 export function createPerfTraceRecording(
@@ -51,6 +56,9 @@ export function createPerfTraceRecording(
     dataLoss: false,
     truncated: false,
     stopping: false,
+    chunkCount: 0,
+    maxChunkEvents: 0,
+    sampleNames: [],
   };
 }
 
@@ -66,13 +74,19 @@ export function appendTraceChunk(
   rec: PerfTraceRecording,
   value: unknown,
 ): void {
+  rec.chunkCount++;
   if (!Array.isArray(value)) return;
+  rec.maxChunkEvents = Math.max(rec.maxChunkEvents, value.length);
   for (const e of value) {
     if (rec.events.length >= TRACE_EVENT_CAP) {
       rec.truncated = true;
       return;
     }
     rec.events.push(e);
+    if (rec.sampleNames.length < 8) {
+      const name = (e as { name?: unknown })?.name;
+      if (typeof name === 'string' && !rec.sampleNames.includes(name)) rec.sampleNames.push(name);
+    }
   }
 }
 
@@ -105,6 +119,10 @@ export interface TraceInsightOptions {
   dataLoss: boolean;
   truncated: boolean;
   completed: boolean;
+  /** Recording diagnostics (honest-output contract): append stats from the pipeline. */
+  chunkCount?: number;
+  maxChunkEvents?: number;
+  sampleNames?: string[];
 }
 
 export interface TraceInsights {
@@ -174,7 +192,12 @@ export function aggregateTraceInsights(
 
   lines.push(`Performance insights (${status.length ? status.join('; ') : 'trace complete'}):`);
   if (opts.url) lines.push(`recording: ${opts.url}`);
-  lines.push(`duration: ${durSec.toFixed(1)}s | events retained: ${parsed.length}`);
+  lines.push(`duration: ${durSec.toFixed(1)}s | chunks: ${opts.chunkCount ?? '?'} (max ${opts.maxChunkEvents ?? '?'} events) | LCP/CLS-class events: ${parsed.length}`);
+  if (parsed.length === 0 && (opts.sampleNames?.length ?? 0) > 0) {
+    lines.push(`zero LCP/CLS events among the trace — names seen: ${opts.sampleNames!.slice(0, 6).join(', ')}`);
+  } else if (parsed.length === 0) {
+    lines.push('zero trace chunks reached the recording — the trace datasource produced nothing (session or build limitation).');
+  }
 
   // LCP section
   lines.push('');
@@ -185,7 +208,7 @@ export function aggregateTraceInsights(
       lines.push(`- ${frameShort(frame)}: ${rel(e.ts)}ms — ${nodeNameHint(d)} — size ${typeof d.size === 'number' ? `${d.size}B` : '?'}`);
     }
   } else {
-    lines.push('LCP: no candidates captured — the page may not have painted.');
+    lines.push('LCP: no candidates captured — the page may not have painted, or the browser emitted the perf events outside this trace window (paint/metric emission to the trace is nondeterministic between runs on some browsers — a zero-class stop can succeed on a retry).');
   }
 
   // CLS section
@@ -198,7 +221,7 @@ export function aggregateTraceInsights(
       lines.push(`- ${clsEvents.length} shift(s) recorded, all input-attributed (excluded)`);
     }
   } else {
-    lines.push('CLS: no layout shifts captured.');
+    lines.push('CLS: no layout shifts captured — the emission caveat mirrors LCP (nondeterministic between runs; a zero-class stop can succeed on a retry).');
   }
 
   return {
