@@ -666,6 +666,13 @@ halves' release rows).
 
 ## 5.5 carcass bookkeeping (momus T2-7; every non-landing item gets a verb)
 
+> **POLICY RECORD (maintainer, 2026-10-30):** 5.5 is the final planned
+> development cycle — its scope is THIS carcass (all items below either
+> land or get a final verb). After 5.5 ships, the repo enters
+> **maintenance mode**: no further planned cycles; the maintainer picks
+> it back up after ~1 month for new feature requests, fixes, or issues
+> as they arise. This row is the plan-of-record for that decision.
+
 - KB candidates carried: none currently besides rides below.
 - `getStorageItems` — KILLED (superseded; revalidate on concrete ask).
 - `Browser.addMockCamera` — KILLED at WS7 (absent on Brave 153, `-32601`

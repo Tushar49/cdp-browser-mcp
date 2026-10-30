@@ -42,6 +42,18 @@ CDP Browser MCP Server connects to your **already-running** browser over a WebSo
 
 ---
 
+## What's New in v5.4.0 — Browser Observability
+
+> Full details in [CHANGELOG.md](CHANGELOG.md). Release notes: [v5.4.0](https://github.com/Tushar49/cdp-browser-mcp/releases/tag/v5.4.0).
+
+| Feature | Description |
+|---------|-------------|
+| 📈 **Render-performance insights** | New `observe perf_start/perf_stop` — record a tab's rendering via CDP Tracing, then get token-capped insights: **LCP** (last candidate per frame: ms, element hint, size) and **CLS** (final cumulative score, input shifts excluded). Optional `categories: ["v8"]` escalation; honest headers for data loss, truncation, and zero-class runs |
+| 🧠 **Heap dump + offline analysis** | New `observe heap_dump/heap_summary` — stream a full `.heapsnapshot` of a tab's renderer heap to a temp file (opt-in, `confirm: true` — dumps can carry auth-state material), then analyze offline: node/edge counts, top constructors by self size, `detachedness` rollup (leak hint), bounded GC-root paths. Bounded-RAM streaming parser; no dominator tree, "retained" not claimed |
+| 🩹 **HAR export fix** | `observe har` now actually exports the captured traffic (regression pin: entry counts + statuses + creator stamp) |
+
+---
+
 ## What's New in v5.0.0
 
 > **Complete architecture restructure** — from a single 254KB file to 38 TypeScript modules.
@@ -86,8 +98,9 @@ CDP Browser MCP Server connects to your **already-running** browser over a WebSo
 | HTTP request mocking | **Yes** | No | No | No | No |
 | Cookie/storage management | **Yes** (full CRUD) | File-based | Cloud profiles | User data dir | No |
 | Device emulation | **Yes** (15 options) | Partial | Limited | No | No |
-| Network throttling | **Yes** (6 presets) | No | No | No | No |
-| Performance metrics | **Yes** (DOM, heap, paint) | No | No | No | Lighthouse |
+| Network throttling | **Yes** (6 presets + per-request rules) | No | No | No | No |
+| Performance metrics | **Yes** (DOM, heap, paint + LCP/CLS trace insights) | No | No | No | Lighthouse |
+| Heap snapshot dump + offline analysis | **Yes** (self-size top-N, detachedness, GC-root paths) | No | No | No | No |
 | PDF export | **Yes** | Yes | No | No | No |
 | File upload | **Yes** | Yes | No | No | No |
 | Drag & drop | **Yes** | Yes | No | No | No |

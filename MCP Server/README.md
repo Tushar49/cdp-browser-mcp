@@ -3,8 +3,9 @@
 Connects AI agents to your **real running Chrome** — your cookies, logins, and
 extensions stay intact. 15 tools / 130 actions over the Chrome DevTools
 Protocol: navigation, accessibility snapshots, element interaction, smart form
-filling, network interception, device emulation, cookies/storage, and a full
-JS debugger.
+filling, network interception, device emulation, cookies/storage, a full
+JS debugger, and browser observability (render-performance trace insights +
+offline heap-snapshot analysis).
 
 ## Install
 
@@ -93,6 +94,7 @@ Connection failures auto-detect the failure mode and print the exact fix — see
 - Token-optimized accessibility snapshots (~15KB)
 - Multi-agent safe: per-agent session isolation + exclusive tab locks
 - Network mocking via request interception
+- Render-performance recording (LCP/CLS trace insights) + offline heap-snapshot analysis
 - Playwright-compatible slim mode for small-context models
 
 ## Documentation
