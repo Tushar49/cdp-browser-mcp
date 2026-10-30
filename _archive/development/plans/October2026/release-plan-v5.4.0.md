@@ -601,7 +601,7 @@ close-out self-audit — 5.3.5's canary churn was comparable.
 | 6 | WS10 perf insights | 1–1.5 | **GATE PASS 2026-10-30** — LCP (552ms, rig H1) + 4 shifts recorded via live slow3g + `['loading']` through the tool path; second-stop contract PASS; class capture is run-nondeterministic (see PROBE RESULT addendum) | 5.4.0 |
 | 7 | WS11 heap dump + summary | 1 | **GATE PASS 2026-10-30** — ground-truth `HeapGateMarker ×421` exact in the offline summary of the live 9.1MB rig dump (86,543 nodes / 385k edges); opt-in gate + streaming finalize + honest header all PASS | 5.4.0 |
 | 8 | WS12 slack/catch-up | 0.25 | **DONE** — EventTiming retry GO → 5.5 first-class; slim-mode re-check green (no change) | 5.4.0 |
-| 9 | 5.4.0 sweep + release | 0.5 | sweep table empty, pipeline green | 5.4.0 |
+| 9 | 5.4.0 sweep + release | 0.5 | **DONE 2026-10-30** — sweep badge 130 exact; post-review HAR fix (`6fcf275`, +2 pins → 535) → promote (hard-verify clean) → Guard+CI green → tag `v5.4.0` → Release published → npm `cdp-mcp-server@5.4.0 = latest` | release |
 
 Self-audit + buffer (momus T2-10): table total ≈ 4.25–5.5 sessions
 (5.3.5 actual ≈ 2.0; 5.4.0 headers sum to their rows, incl. the
