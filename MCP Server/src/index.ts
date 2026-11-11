@@ -43,7 +43,7 @@ import { preprocessToolCall } from './tools/dispatch.js';
 import { defineTool, success } from './tools/base-tool.js';
 import { listTools } from './tools/list-tools.js';
 import { applyWebMcpEvent, clearWebMcpState } from './tools/webmcp.js';
-import { appendTraceChunk } from './utils/trace-insights.js';
+import { appendTraceChunk, appendRawTraceChunk, abandonRawTrace } from './utils/trace-insights.js';
 import { ActionableError, wrapError } from './utils/error-handler.js';
 import type { ServerContext, FileChooserHandler } from './types.js';
 
@@ -297,7 +297,10 @@ function wireEventPipeline(serverCtx: ServerContext): void {
       // so passive Tracing events cost nothing.
       case 'Tracing.dataCollected': {
         const rec = serverCtx.perfTraces.get(sessionId);
-        if (rec) appendTraceChunk(rec, params.value);
+        if (rec) {
+          appendTraceChunk(rec, params.value);
+          appendRawTraceChunk(rec, params.value);
+        }
         break;
       }
 
@@ -314,7 +317,8 @@ function wireEventPipeline(serverCtx: ServerContext): void {
       // shape: per-tab state dies with the session — the browser drops
       // tracing on detach, so there is nothing left to best-effort-end).
       case 'Inspector.detached': {
-        serverCtx.perfTraces.delete(sessionId);
+        const rec = serverCtx.perfTraces.get(sessionId);
+        if (rec) { abandonRawTrace(rec); serverCtx.perfTraces.delete(sessionId); }
         const hd = serverCtx.heapDumps.get(sessionId);
         if (hd) { try { hd.writer.abandon(); } catch { } serverCtx.heapDumps.delete(sessionId); }
         break;
@@ -322,7 +326,8 @@ function wireEventPipeline(serverCtx: ServerContext): void {
 
       case 'Target.detachedFromTarget': {
         if (typeof params.sessionId === 'string') {
-          serverCtx.perfTraces.delete(params.sessionId);
+          const rec = serverCtx.perfTraces.get(params.sessionId);
+          if (rec) { abandonRawTrace(rec); serverCtx.perfTraces.delete(params.sessionId); }
           const hd = serverCtx.heapDumps.get(params.sessionId);
           if (hd) { try { hd.writer.abandon(); } catch { } serverCtx.heapDumps.delete(params.sessionId); }
         }

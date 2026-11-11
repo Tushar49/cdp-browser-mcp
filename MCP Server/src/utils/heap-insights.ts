@@ -457,3 +457,208 @@ export async function summarizeHeapSnapshot(
   const { summary } = summarizeTables(t, opts);
   return summary;
 }
+
+// ─── 5. heap_diff (5.5 WSC) ─────────────────────────────────────────
+
+export interface HeapDiffOptions {
+  /** Max constructor-change rows rendered (default 15). */
+  topN?: number;
+  /** Per-file byte cap override (internal/test surface). */
+  maxBytes?: number;
+}
+
+export interface HeapDiffResult {
+  output: string;
+  newConstructors: number;
+  goneConstructors: number;
+  grownConstructors: number;
+  shrunkConstructors: number;
+  nodeCountDelta: number;
+  stringCountDelta: number;
+}
+
+interface CtorStat {
+  type: string;
+  name: string;
+  count: number;
+  selfBytes: number;
+  /** Exact self-size → instance count (identity is never node-ids). */
+  sizes: Map<number, number>;
+}
+
+interface IdentityRollup {
+  ctors: Map<string, CtorStat>;
+  /** Coarse log2 byte bucket → totals (rendered separately as ≈). */
+  buckets: Map<number, { count: number; bytes: number }>;
+  nodeCount: number;
+  stringCount: number;
+  totalSelf: number;
+}
+
+/**
+ * Scan ONE snapshot into identity rollups and drop the raw tables before
+ * the caller scans the second file — two full Int32 tables are never held
+ * simultaneously (heap_diff on two large dumps stays bounded).
+ */
+async function scanIdentity(filePath: string, maxBytes = HEAP_SNAPSHOT_MAX_BYTES): Promise<IdentityRollup> {
+  const t = await scanTables(filePath, maxBytes);
+  const idx = (name: string): number => {
+    const i = t.nodeFields.indexOf(name);
+    if (i === -1) throw new Error(`node_fields has no '${name}' column — unknown format version.`);
+    return i;
+  };
+  const typeIdx = idx('type');
+  const nameIdx = idx('name');
+  const selfIdx = idx('self_size');
+  const typeNames = t.nodeTypes[0] ?? [];
+
+  const ctors = new Map<string, CtorStat>();
+  const buckets = new Map<number, { count: number; bytes: number }>();
+  let totalSelf = 0;
+
+  for (let r = 0; r < t.nodeRows; r++) {
+    const off = r * t.nodeFields.length;
+    const type = typeNames[t.nodes[off + typeIdx]] ?? String(t.nodes[off + typeIdx]);
+    const nameId = t.nodes[off + nameIdx];
+    const name = nameId < t.stringTable.length ? t.stringTable[nameId] : `<str:${nameId}>`;
+    const selfSize = t.nodes[off + selfIdx];
+    totalSelf += selfSize;
+
+    const bucket = selfSize <= 0 ? 0 : Math.floor(Math.log2(selfSize));
+    const b = buckets.get(bucket) ?? { count: 0, bytes: 0 };
+    b.count++; b.bytes += selfSize;
+    buckets.set(bucket, b);
+
+    if (type === 'object' || type === 'closure' || type === 'array') {
+      const key = `${type}\u0000${name}`;
+      const c = ctors.get(key) ?? { type, name, count: 0, selfBytes: 0, sizes: new Map<number, number>() };
+      c.count++; c.selfBytes += selfSize;
+      c.sizes.set(selfSize, (c.sizes.get(selfSize) ?? 0) + 1);
+      ctors.set(key, c);
+    }
+  }
+
+  return { ctors, buckets, nodeCount: t.nodeRows, stringCount: t.stringTable.length, totalSelf };
+}
+
+function fmtBytes(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1048576) return `${(n / 1048576).toFixed(2)}MB`;
+  if (abs >= 1024) return `${(n / 1024).toFixed(1)}KB`;
+  return `${n}B`;
+}
+
+function bucketLabel(pow: number): string {
+  const lo = pow <= 0 ? 0 : Math.pow(2, pow);
+  const hi = Math.pow(2, pow + 1);
+  const f = (x: number): string => (x >= 1024 ? `${x / 1024}KB` : `${x}B`);
+  return `${f(lo)}–${f(hi)}`;
+}
+
+/**
+ * Diff two `.heapsnapshot` files by self-size semantics (5.5 WSC).
+ *
+ * Identity: constructor (type, name) with an EXACT self-size breakdown —
+ * never node ids. Constructors are classified NEW / GONE / GROWN / SHRUNK by
+ * total self bytes, with per-exact-size count deltas. A coarse ≈ byte-bucket
+ * rollup is rendered separately and never mixed with the exact tables.
+ * No dominator tree → "retained" is NOT claimed.
+ */
+export async function diffHeapSnapshots(
+  pathA: string,
+  pathB: string,
+  opts: HeapDiffOptions = {},
+): Promise<HeapDiffResult> {
+  const a = await scanIdentity(pathA, opts.maxBytes);
+  const b = await scanIdentity(pathB, opts.maxBytes);
+
+  type Row = {
+    cls: 'NEW' | 'GONE' | 'GROWN' | 'SHRUNK';
+    type: string;
+    name: string;
+    countA: number;
+    countB: number;
+    bytesA: number;
+    bytesB: number;
+    delta: number;
+    sizeDelta: string;
+  };
+  const rows: Row[] = [];
+  let newC = 0, goneC = 0, grownC = 0, shrunkC = 0;
+
+  const keys = new Set<string>([...a.ctors.keys(), ...b.ctors.keys()]);
+  for (const key of keys) {
+    const ca = a.ctors.get(key);
+    const cb = b.ctors.get(key);
+    const countA = ca?.count ?? 0;
+    const countB = cb?.count ?? 0;
+    const bytesA = ca?.selfBytes ?? 0;
+    const bytesB = cb?.selfBytes ?? 0;
+    const delta = bytesB - bytesA;
+    let cls: Row['cls'];
+    if (!ca) { cls = 'NEW'; newC++; }
+    else if (!cb) { cls = 'GONE'; goneC++; }
+    else if (delta > 0) { cls = 'GROWN'; grownC++; }
+    else if (delta < 0) { cls = 'SHRUNK'; shrunkC++; }
+    else continue;
+
+    // Exact-size breakdown of the count change (biggest magnitude first).
+    const sizes = new Set<number>([...(ca?.sizes.keys() ?? []), ...(cb?.sizes.keys() ?? [])]);
+    const parts: Array<{ size: number; d: number }> = [];
+    for (const size of sizes) {
+      const nA = ca?.sizes.get(size) ?? 0;
+      const nB = cb?.sizes.get(size) ?? 0;
+      if (nA !== nB) parts.push({ size, d: nB - nA });
+    }
+    parts.sort((x, y) => Math.abs(y.d) - Math.abs(x.d));
+    const sizeDelta = parts.slice(0, 2).map((p) => `${fmtBytes(p.size)} ×${p.d > 0 ? '+' : ''}${p.d}`).join(', ');
+
+    rows.push({
+      cls, type: (cb ?? ca)!.type, name: (cb ?? ca)!.name,
+      countA, countB, bytesA, bytesB, delta, sizeDelta,
+    });
+  }
+
+  rows.sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+  const top = rows.slice(0, opts.topN ?? 15);
+
+  const out: string[] = [];
+  out.push('Heap diff (self-size semantics; no dominator tree — "retained" NOT claimed):');
+  out.push(`A: ${pathA}`);
+  out.push(`B: ${pathB}`);
+  out.push(`nodes: ${a.nodeCount} → ${b.nodeCount} (Δ ${b.nodeCount - a.nodeCount >= 0 ? '+' : ''}${b.nodeCount - a.nodeCount}) | strings: ${a.stringCount} → ${b.stringCount} (Δ ${b.stringCount - a.stringCount >= 0 ? '+' : ''}${b.stringCount - a.stringCount}) | self total: ${fmtBytes(a.totalSelf)} → ${fmtBytes(b.totalSelf)} (Δ ${b.totalSelf - a.totalSelf >= 0 ? '+' : ''}${fmtBytes(b.totalSelf - a.totalSelf)})`);
+  out.push(`constructors: NEW ${newC} | GONE ${goneC} | GROWN ${grownC} | SHRUNK ${shrunkC}`);
+  out.push('');
+  out.push(`Top ${top.length} of ${rows.length} constructor changes by |self-byte delta| (identity: constructor + exact self-size):`);
+  for (const r of top) {
+    const sign = r.delta > 0 ? '+' : '';
+    const counts = r.cls === 'NEW' ? `×${r.countB} new`
+      : r.cls === 'GONE' ? `×${r.countA} gone`
+        : `×${r.countA} → ×${r.countB}`;
+    const sizes = r.sizeDelta ? ` (sizes: ${r.sizeDelta})` : '';
+    out.push(`- [${r.cls}] ${r.name} (${r.type}): ${counts} — self ${sign}${fmtBytes(r.delta)}${sizes}`);
+  }
+
+  // Coarse ≈ rollup — separate section, never mixed with exact rows.
+  out.push('');
+  out.push('(≈) Byte-bucket rollup (coarse approximation, self-size; separate from the exact table):');
+  const bucketKeys = new Set<number>([...a.buckets.keys(), ...b.buckets.keys()]);
+  const bucketRows = [...bucketKeys].map((k) => {
+    const ba = a.buckets.get(k)?.bytes ?? 0;
+    const bb = b.buckets.get(k)?.bytes ?? 0;
+    return { k, ba, bb, d: bb - ba };
+  }).sort((x, y) => Math.abs(y.d) - Math.abs(x.d)).slice(0, 8);
+  for (const br of bucketRows) {
+    out.push(`- ${bucketLabel(br.k)}: ${fmtBytes(br.ba)} → ${fmtBytes(br.bb)} (Δ ${br.d >= 0 ? '+' : ''}${fmtBytes(br.d)})`);
+  }
+
+  return {
+    output: out.join('\n'),
+    newConstructors: newC,
+    goneConstructors: goneC,
+    grownConstructors: grownC,
+    shrunkConstructors: shrunkC,
+    nodeCountDelta: b.nodeCount - a.nodeCount,
+    stringCountDelta: b.stringCount - a.stringCount,
+  };
+}

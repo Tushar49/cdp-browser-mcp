@@ -9,8 +9,8 @@ import type { ToolRegistry } from './registry.js';
 import type { ServerContext, ToolResult, NetworkRequestEntry, DownloadEntry } from '../types.js';
 import { TempFileManager } from '../utils/temp-files.js';
 import { VERSION } from '../version.js';
-import { createPerfTraceRecording, aggregateTraceInsights } from '../utils/trace-insights.js';
-import { summarizeHeapSnapshot } from '../utils/heap-insights.js';
+import { createPerfTraceRecording, aggregateTraceInsights, RAW_TRACE_MAX_BYTES, finalizeRawTrace, abandonRawTrace } from '../utils/trace-insights.js';
+import { summarizeHeapSnapshot, diffHeapSnapshots } from '../utils/heap-insights.js';
 import { isMethodMissingError } from '../connection/capabilities.js';
 import { join } from 'path';
 import { defineTool } from './base-tool.js';
@@ -397,18 +397,41 @@ async function handlePerfStart(
     if (typeof v === 'string') url = v;
   }
 
-  await ctx.sendCommand('Tracing.start', {
-    traceConfig: {
-      recordMode: 'recordAsMuchAsPossible',
-      includedCategories: included,
-    },
-  }, sess);
-  ctx.perfTraces.set(sess, createPerfTraceRecording(Date.now(), url, included.includes('v8')));
+  const rec = createPerfTraceRecording(Date.now(), url, included.includes('v8'));
+  if (params.keepRaw === true) {
+    const tempDir = ctx.config.tempDir || join(process.cwd(), '.temp');
+    const manager = new TempFileManager({
+      tempDir,
+      maxTempFiles: ctx.config.maxTempFiles,
+      maxTempAgeMs: ctx.config.maxTempAgeMs,
+    });
+    rec.rawWriter = manager.openStreamWriter(`raw-trace-${Date.now()}.jsonl`, {
+      sessionPrefix: sess,
+      maxBytes: RAW_TRACE_MAX_BYTES,
+    });
+  }
+  // Register BEFORE start so the very first dataCollected chunk can land.
+  ctx.perfTraces.set(sess, rec);
+  try {
+    await ctx.sendCommand('Tracing.start', {
+      traceConfig: {
+        recordMode: 'recordAsMuchAsPossible',
+        includedCategories: included,
+      },
+    }, sess);
+  } catch (err: unknown) {
+    abandonRawTrace(rec);
+    ctx.perfTraces.delete(sess);
+    return fail(`perf_start failed: ${(err as Error).message}`);
+  }
 
   const interactionNote = included.includes('v8')
     ? ' Interact with the page (click or keypress) during the recording to capture interaction timing (EventTiming/INP).'
     : " For interaction timing, restart with categories: ['v8'] and interact during the recording.";
-  return ok(`Performance recording started (categories: ${included.join('+')}). Navigate or let the page render, then call observe perf_stop on this tab to extract insights (LCP, CLS${included.includes('v8') ? ', interaction latency' : ''}). Capture quality depends on the page rendering during the recording.${interactionNote}`);
+  const rawNote = rec.rawWriter
+    ? ' Raw events are streaming to a .jsonl temp file (path provided by perf_stop).'
+    : '';
+  return ok(`Performance recording started (categories: ${included.join('+')}). Navigate or let the page render, then call observe perf_stop on this tab to extract insights (LCP, CLS${included.includes('v8') ? ', interaction latency' : ''}). Capture quality depends on the page rendering during the recording.${interactionNote}${rawNote}`);
 }
 
 /**
@@ -434,6 +457,7 @@ async function handlePerfStop(
     await ctx.sendCommand('Tracing.end', {}, sess);
   } catch (err: unknown) {
     // Session died between start and stop — recording is unrecoverable.
+    abandonRawTrace(rec);
     ctx.perfTraces.delete(sess);
     return fail(`Performance recording lost — the session ended before the trace could be stopped (${(err as Error).message}). Restart: observe perf_start.`);
   }
@@ -445,6 +469,8 @@ async function handlePerfStop(
   }
 
   ctx.perfTraces.delete(sess);
+  const rawBytes = rec.rawWriter?.byteCount ?? 0;
+  const rawPath = finalizeRawTrace(rec);
   const insight = aggregateTraceInsights(rec.events, {
     url: rec.url,
     startedAt: rec.startedAt,
@@ -457,7 +483,14 @@ async function handlePerfStop(
     sampleNames: rec.sampleNames,
     v8Category: rec.escalated,
   });
-  return ok(insight.output);
+  const rawLines: string[] = [];
+  if (rawPath) {
+    rawLines.push(`Raw trace dump: ${rawPath} (${(rawBytes / 1048576).toFixed(2)}MB JSONL — one event per line; stays until cleanup clean_temp removes it).`);
+  }
+  if (rec.rawError) {
+    rawLines.push(`Raw trace dump abandoned: ${rec.rawError} The *.partial file stays on disk (clean_temp removes it).`);
+  }
+  return ok(rawLines.length ? `${insight.output}\n\n${rawLines.join('\n')}` : insight.output);
 }
 
 /**
@@ -540,11 +573,35 @@ async function handleHeapSummary(
   }
 }
 
-async function handleDownloads(
+/**
+ * 5.5 WSC heap_diff: offline diff of two .heapsnapshot files (pure-node).
+ * Identity = constructor + exact self-size; NEW/GONE/GROWN/SHRUNK classes,
+ * node/string deltas, and a separate ≈ byte-bucket rollup.
+ */
+async function handleHeapDiff(
   ctx: ServerContext,
   params: Record<string, unknown>,
 ): Promise<ToolResult> {
-  const sess = params._sessionId as string;
+  void ctx;
+  const pathA = params.pathA as string;
+  const pathB = params.pathB as string;
+  if (!pathA || !pathB) {
+    return fail("Provide 'pathA' and 'pathB' — two .heapsnapshot files (paths heap_dump returned). Diff is A → B.");
+  }
+  try {
+    const diff = await diffHeapSnapshots(pathA, pathB, {
+      topN: typeof params.top === 'number' ? params.top : 15,
+    });
+    return ok(diff.output);
+  } catch (err: unknown) {
+    return fail(`heap_diff failed: ${(err as Error).message}`);
+  }
+}
+
+async function handleDownloads(
+  ctx: ServerContext,
+  params: Record<string, unknown>,
+): Promise<ToolResult> {  const sess = params._sessionId as string;
   await ctx.sendCommand('Page.enable', {}, sess);
 
   // Downloads are tracked in a per-session list by the runtime layer.
@@ -639,10 +696,11 @@ export function registerObserveTools(
         '- network: List captured network requests with URLs, methods, status codes, and timing (requires: tabId; optional: filter — URL substring, types — resource type filter array, last, clear)',
         '- request: Get the full request and response body for a specific network request (requires: tabId; provide either requestId — from network listing — or urlFilter — substring of the URL; urlFilter resolves to the most recent matching request)',
         '- performance: Collect page performance metrics including DOM size, JS heap, layout counts, and paint timing (requires: tabId)',
-        '- perf_start: Begin recording page rendering performance via CDP Tracing (LCP candidates + layout shifts + interaction latency). Returns immediately. Call observe perf_stop on the same tab to finish and extract insights. Capture quality depends on the page rendering during the recording; per-frame paint-metric emission to the trace is nondeterministic between runs on some browsers — a zero-class result can succeed on a retry. Interaction timing (EventTiming/INP) requires categories: ["v8"] AND real input during the window (requires: tabId; optional: categories — ["v8"] appends the v8 category set to the default loading-only set; other values are rejected)',
+        '- perf_start: Begin recording page rendering performance via CDP Tracing (LCP candidates + layout shifts + interaction latency). Returns immediately. Call observe perf_stop on the same tab to finish and extract insights. Capture quality depends on the page rendering during the recording; per-frame paint-metric emission to the trace is nondeterministic between runs on some browsers — a zero-class result can succeed on a retry. Interaction timing (EventTiming/INP) requires categories: ["v8"] AND real input during the window (requires: tabId; optional: categories — ["v8"] enables the v8+devtools.timeline set; other values are rejected; optional: keepRaw — also stream every raw trace event to a .jsonl temp file, off by default)',
         '- perf_stop: Stop the recording started by perf_start on this tab and aggregate it into token-capped insights: LCP (last candidate per frame), CLS (final cumulative score, input shifts excluded), and interaction latency (EventTiming top-3 by duration when v8 + input captured it). If the session died mid-recording, the stop reports the recording as lost (requires: tabId)',
         '- heap_dump: Stream a full .heapsnapshot of this tab\'s renderer heap to a session temp file (chunks land in a *.partial file renamed on completion; discoverable by cleanup clean_temp, never auto-deleted). Dumps can carry auth-state material from page JS — opt-in required. Review offline with heap_summary (requires: tabId; confirm: true)',
         '- heap_summary: Offline parse + summary of a .heapsnapshot file — node counts, top constructors by SELF size, detachedness rollup, bounded GC-root paths. Self-size semantics (no dominator tree; "retained" is not claimed). Requires a live browser connection like any tool, but parses the file in-process (requires: path — the heap_dump-returned file; optional: top, hintDepth, hintBudget)',
+        '- heap_diff: Offline diff of TWO .heapsnapshot files (A → B) by SELF size. Identity = constructor (type+name) with an EXACT self-size breakdown (never node ids); classes NEW / GONE / GROWN / SHRUNK, node/string deltas, plus a separate ≈ byte-bucket rollup. No dominator tree — "retained" is not claimed (requires: pathA, pathB — the heap_dump-returned files; optional: top)',
         '- memory: DOM/JS memory counters (documents, nodes, JS event listeners) before/after a forced GC sweep via Memory.prepareForLeakDetection, plus leak-detection counters when supported (requires: tabId)',
         '- downloads: List tracked file downloads with progress info (requires: tabId; optional: last, clear)',
         '- har: Export captured network requests as HAR 1.2 JSON (requires: tabId)',
@@ -657,7 +715,7 @@ export function registerObserveTools(
       inputSchema: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['console', 'network', 'request', 'performance', 'perf_start', 'perf_stop', 'heap_dump', 'heap_summary', 'memory', 'downloads', 'har'], description: 'Observe action.' },
+          action: { type: 'string', enum: ['console', 'network', 'request', 'performance', 'perf_start', 'perf_stop', 'heap_dump', 'heap_summary', 'heap_diff', 'memory', 'downloads', 'har'], description: 'Observe action.' },
           tabId: { type: 'string', description: 'Tab ID.' },
           level: { type: 'string', enum: ['all', 'error', 'warning', 'log', 'info', 'debug'], description: 'Console level filter.' },
           filter: { type: 'string', description: 'Network URL filter.' },
@@ -670,6 +728,10 @@ export function registerObserveTools(
           cleanupStrategy: { type: 'string', enum: ['close', 'detach', 'none'], description: "Tab cleanup on session expiry. 'detach' (default) keeps tabs open, 'close' removes them, 'none' skips cleanup. Sticky per session." },
           categories: { type: 'array', items: { type: 'string' }, description: "perf_start only: category-set override; accepted value(s): ['v8'] (enables the interaction-timing set: v8 + devtools.timeline appended to the default 'loading' set). Other values are rejected." },
           path: { type: 'string', description: 'heap_summary only: absolute path of a .heapsnapshot file (the path heap_dump returned).' },
+          pathA: { type: 'string', description: 'heap_diff only: absolute path of the BASELINE .heapsnapshot (A).' },
+          pathB: { type: 'string', description: 'heap_diff only: absolute path of the COMPARISON .heapsnapshot (B). Diff is A → B.' },
+          top: { type: 'number', description: 'heap_summary/heap_diff only: max rows rendered (default 25 / 15).' },
+          keepRaw: { type: 'boolean', description: 'perf_start only: ALSO stream every raw trace event to a .jsonl temp file (kept until clean_temp). Off by default; the aggregated insights are unchanged.' },
           confirm: { type: 'boolean', description: 'heap_dump only: set true to acknowledge the opt-in (heap dumps can carry auth-state material from page JS).' },
           exclusive: { type: 'boolean', description: 'Lock tab to this session (default: true). Set false to allow shared access.' },
         },
@@ -686,10 +748,11 @@ export function registerObserveTools(
           case 'perf_stop':  return handlePerfStop(ctx, params);
           case 'heap_dump':    return handleHeapDump(ctx, params);
           case 'heap_summary': return handleHeapSummary(ctx, params);
+          case 'heap_diff':  return handleHeapDiff(ctx, params);
           case 'memory':     return handleMemory(ctx, params);
           case 'downloads':  return handleDownloads(ctx, params);
           case 'har':        return handleHar(ctx, params);
-          default:            return fail(`Unknown observe action: "${action}". Use: console, network, request, performance, perf_start, perf_stop, heap_dump, heap_summary, memory, downloads, har`);
+          default:            return fail(`Unknown observe action: "${action}". Use: console, network, request, performance, perf_start, perf_stop, heap_dump, heap_summary, heap_diff, memory, downloads, har`);
         }
       },
     }),

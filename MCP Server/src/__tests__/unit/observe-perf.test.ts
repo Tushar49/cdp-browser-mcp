@@ -17,6 +17,9 @@ import {
   appendTraceChunk,
   createPerfTraceRecording,
   aggregateTraceInsights,
+  appendRawTraceChunk,
+  finalizeRawTrace,
+  abandonRawTrace,
   TRACE_EVENT_CAP,
 } from '../../utils/trace-insights.js';
 import type { ServerContext, PerfTraceRecording } from '../../types.js';
@@ -55,7 +58,8 @@ describe('observe WS10 — perf_start / perf_stop wiring', () => {
     expect(acts).toContain('perf_stop');
     expect(acts).toContain('heap_dump');
     expect(acts).toContain('heap_summary');
-    expect(acts).toHaveLength(11);
+    expect(acts).toContain('heap_diff');
+    expect(acts).toHaveLength(12);
   });
 
   it('description documents the new operations', () => {
@@ -64,12 +68,12 @@ describe('observe WS10 — perf_start / perf_stop wiring', () => {
     expect(tool.description).toContain('- perf_stop: Stop the recording started by perf_start');
   });
 
-  it('dispatch-fail string enumerates all 11 actions (sweep second source)', async () => {
+  it('dispatch-fail string enumerates all 12 actions (sweep second source)', async () => {
     const { ctx } = makeCtx();
     const res = await registry.dispatch('observe', args({ action: 'banana' }), ctx);
     const text = textOf(res);
     expect(text).toContain('Unknown observe action: "banana"');
-    expect(text).toContain('console, network, request, performance, perf_start, perf_stop, heap_dump, heap_summary, memory, downloads, har');
+    expect(text).toContain('console, network, request, performance, perf_start, perf_stop, heap_dump, heap_summary, heap_diff, memory, downloads, har');
   });
 
   it('happy path: start records, stop aggregates LCP + CLS from synthetic chunks', async () => {
@@ -304,5 +308,73 @@ describe('WS10 scrubber decision pin — perf output is DEFAULT-SCRUBBED (no opt
   });
   it('structured LCP attribution fields under secret-bearing keys are masked', () => {
     expect(scrubText('{"nodeName":"IMG","size":10,"auth":"bearer1"}')).toBe('{"nodeName":"IMG","size":10,"auth":"***"}');
+  });
+});
+
+describe('WSC — raw-trace dump (keepRaw)', () => {
+  function fakeWriter() {
+    const chunks: string[] = [];
+    let bytes = 0;
+    const w = {
+      chunks,
+      abandoned: false,
+      byteCount: 0,
+      finalPath: 'C:/temp/raw-trace.jsonl',
+      partialPath: 'C:/temp/raw-trace.jsonl.partial',
+      write(s: string) { bytes += Buffer.byteLength(s); w.byteCount = bytes; chunks.push(s); },
+      finalize() { return w.finalPath; },
+      abandon() { w.abandoned = true; },
+    };
+    return w;
+  }
+
+  it('no writer → append is a no-op (keepRaw off)', () => {
+    const rec = createPerfTraceRecording(0, null);
+    expect(rec.rawWriter).toBeNull();
+    appendRawTraceChunk(rec, [lcpEvent('F', 1, {})]);
+    expect(rec.rawError).toBeNull();
+  });
+
+  it('writes one JSONL line per raw event', () => {
+    const rec = createPerfTraceRecording(0, null);
+    const w = fakeWriter();
+    rec.rawWriter = w as never;
+    appendRawTraceChunk(rec, [lcpEvent('F', 1, { size: 1 }), shiftEvent(2, 0.01)]);
+    const lines = w.chunks.join('').trim().split('\n');
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[0]).name).toBe('largestContentfulPaint::Candidate');
+    expect(JSON.parse(lines[1]).name).toBe('LayoutShift');
+  });
+
+  it('finalize renames → returns the advertised path and clears the writer', () => {
+    const rec = createPerfTraceRecording(0, null);
+    const w = fakeWriter();
+    rec.rawWriter = w as never;
+    const p = finalizeRawTrace(rec);
+    expect(p).toBe('C:/temp/raw-trace.jsonl');
+    expect(rec.rawPath).toBe(p);
+    expect(rec.rawWriter).toBeNull();
+  });
+
+  it('cap overrun → actionable rawError, writer abandoned, .partial kept', () => {
+    const rec = createPerfTraceRecording(0, null);
+    const w = fakeWriter();
+    w.write = () => { throw new Error('Temp-file size cap reached (50MB) — aborting the artifact'); };
+    rec.rawWriter = w as never;
+    appendRawTraceChunk(rec, [lcpEvent('F', 1, {})]);
+    expect(rec.rawError).toContain('size cap reached');
+    expect(w.abandoned).toBe(true);
+    expect(rec.rawWriter).toBeNull();
+    expect(finalizeRawTrace(rec)).toBeNull();
+  });
+
+  it('abandonRawTrace closes without advertising a path (session death)', () => {
+    const rec = createPerfTraceRecording(0, null);
+    const w = fakeWriter();
+    rec.rawWriter = w as never;
+    abandonRawTrace(rec);
+    expect(w.abandoned).toBe(true);
+    expect(rec.rawPath).toBeNull();
+    expect(rec.rawWriter).toBeNull();
   });
 });

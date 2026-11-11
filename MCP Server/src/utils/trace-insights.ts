@@ -24,8 +24,13 @@
  * `['v8']` → ×32/×14). Output states the requirement honestly when absent.
  */
 
+import type { TempStreamWriter } from './temp-files.js';
+
 /** Hard cap on raw trace events retained per recording (plan: never OOM). */
 export const TRACE_EVENT_CAP = 50_000;
+
+/** Raw-trace dump size cap (5.5 WSC keepRaw). */
+export const RAW_TRACE_MAX_BYTES = 50 * 1024 * 1024;
 
 /** Recording-side state mutated by the event pipeline (synchronous append). */
 export interface PerfTraceRecording {
@@ -49,6 +54,12 @@ export interface PerfTraceRecording {
   sampleNames: string[];
   /** True when perf_start escalated categories to include 'v8' (EventTiming gate). */
   escalated: boolean;
+  /** 5.5 WSC keepRaw: streaming raw-event writer (jsonl), or null. */
+  rawWriter: TempStreamWriter | null;
+  /** Final path advertised by perf_stop once the raw dump is finalized. */
+  rawPath: string | null;
+  /** Set when the raw writer hit its cap or errored (partial orphan remains). */
+  rawError: string | null;
 }
 
 export function createPerfTraceRecording(
@@ -68,6 +79,9 @@ export function createPerfTraceRecording(
     maxChunkEvents: 0,
     sampleNames: [],
     escalated,
+    rawWriter: null,
+    rawPath: null,
+    rawError: null,
   };
 }
 
@@ -97,6 +111,46 @@ export function appendTraceChunk(
       if (typeof name === 'string' && !rec.sampleNames.includes(name)) rec.sampleNames.push(name);
     }
   }
+}
+
+// ─── Raw-trace dump (5.5 WSC keepRaw) ───────────────────────────────
+
+/**
+ * Append one `dataCollected` chunk verbatim as JSONL to the raw dump (only
+ * when perf_start keepRaw created a writer). Cap overrun abandons the writer
+ * and records an actionable `rawError`; the `.partial` orphan stays on disk.
+ */
+export function appendRawTraceChunk(rec: PerfTraceRecording, value: unknown): void {
+  if (!rec.rawWriter || !Array.isArray(value)) return;
+  try {
+    let buf = '';
+    for (const e of value) buf += JSON.stringify(e) + '\n';
+    rec.rawWriter.write(buf);
+  } catch (err) {
+    rec.rawError = (err as Error).message;
+    try { rec.rawWriter.abandon(); } catch { /* ok */ }
+    rec.rawWriter = null;
+  }
+}
+
+/** Finalize the raw dump (rename .partial → final) and return its path. */
+export function finalizeRawTrace(rec: PerfTraceRecording): string | null {
+  if (!rec.rawWriter) return null;
+  try {
+    rec.rawPath = rec.rawWriter.finalize();
+  } catch (err) {
+    rec.rawError = (err as Error).message;
+    try { rec.rawWriter.abandon(); } catch { /* ok */ }
+  }
+  rec.rawWriter = null;
+  return rec.rawPath;
+}
+
+/** Close the raw writer WITHOUT finalizing (session death / errors). */
+export function abandonRawTrace(rec: PerfTraceRecording): void {
+  if (!rec.rawWriter) return;
+  try { rec.rawWriter.abandon(); } catch { /* ok */ }
+  rec.rawWriter = null;
 }
 
 interface TraceEvent {
