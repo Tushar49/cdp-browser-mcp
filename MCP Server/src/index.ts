@@ -321,6 +321,7 @@ function wireEventPipeline(serverCtx: ServerContext): void {
         if (rec) { abandonRawTrace(rec); serverCtx.perfTraces.delete(sessionId); }
         const hd = serverCtx.heapDumps.get(sessionId);
         if (hd) { try { hd.writer.abandon(); } catch { } serverCtx.heapDumps.delete(sessionId); }
+        serverCtx.networkRulesBySession.delete(sessionId);
         break;
       }
 
@@ -330,6 +331,7 @@ function wireEventPipeline(serverCtx: ServerContext): void {
           if (rec) { abandonRawTrace(rec); serverCtx.perfTraces.delete(params.sessionId); }
           const hd = serverCtx.heapDumps.get(params.sessionId);
           if (hd) { try { hd.writer.abandon(); } catch { } serverCtx.heapDumps.delete(params.sessionId); }
+          serverCtx.networkRulesBySession.delete(params.sessionId);
         }
         break;
       }
@@ -613,6 +615,7 @@ const ctx: ServerContext = {
   pendingFetchRequests: new Map(),
   perfTraces: new Map(),
   heapDumps: new Map(),
+  networkRulesBySession: new Map(),
   webmcpTools: new Map(),
   webmcpInvocations: new Map(),
 };
