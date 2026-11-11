@@ -57,6 +57,15 @@ describe('retryWithLadder()', () => {
     expect(result).toBe(1);
     expect(calls).toBe(1);
   });
+
+  it('rethrows non-retriable errors (strict-mode ambiguity) immediately', async () => {
+    let calls = 0;
+    const err = Object.assign(new Error('ambiguous locator'), { nonRetriable: true });
+    await expect(
+      retryWithLadder(async () => { calls++; throw err; }, { timeoutMs: 5000 }),
+    ).rejects.toThrow('ambiguous locator');
+    expect(calls).toBe(1);
+  });
 });
 
 describe('runActionabilityGate()', () => {

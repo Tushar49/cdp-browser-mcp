@@ -86,6 +86,48 @@ async function byRuleCapable(ctx: ServerContext, sess: string): Promise<boolean>
   return ctx.capabilities.has(ctx.cdpClient, 'Network.emulateNetworkConditionsByRule', sess);
 }
 
+/**
+ * Per-session active rule list (5.5 WSD). Lazy-initializes so mocked
+ * contexts (tests) work without the map being pre-seeded.
+ */
+function rulesState(ctx: ServerContext): Map<string, NetworkConditionsEntry[]> {
+  const holder = ctx as ServerContext & {
+    networkRulesBySession?: Map<string, NetworkConditionsEntry[]>;
+  };
+  if (!holder.networkRulesBySession) holder.networkRulesBySession = new Map();
+  return holder.networkRulesBySession;
+}
+
+/** Render the active rule list with indices + first-match evaluation order. */
+function renderRules(rules: NetworkConditionsEntry[]): string {
+  if (rules.length === 0) {
+    return 'Network rules: none active (native network conditions apply).';
+  }
+  const lines = [
+    `Network rules: ${rules.length} active, first-match-wins (index order = evaluation order):`,
+  ];
+  rules.forEach((r, i) => {
+    const pattern = typeof r.urlPattern === 'string' && r.urlPattern !== ''
+      ? `urlPattern="${r.urlPattern}"`
+      : 'urlPattern="" (match all)';
+    const rate = (v: unknown): string => (v === -1 ? '-1 (unlimited)' : `${v}B/s`);
+    const parts = [
+      pattern,
+      `latency ${r.latency}ms`,
+      `down ${rate(r.downloadThroughput)}`,
+      `up ${rate(r.uploadThroughput)}`,
+    ];
+    if (typeof r.packetLoss === 'number') parts.push(`packetLoss ${r.packetLoss}%`);
+    lines.push(`  [${i}] ${parts.join(' — ')}`);
+  });
+  return lines.join('\n');
+}
+
+/** Fail actionably when the browser lacks the ByRule transport. */
+function byRuleUnsupported(): ToolResult {
+  return fail('Network.emulateNetworkConditionsByRule is not supported on this browser (requires Chrome 152+). Update Chrome/Brave to manage per-request network rules.');
+}
+
 // ─── Handler ────────────────────────────────────────────────────────
 
 async function handleEmulate(
@@ -123,6 +165,7 @@ async function handleEmulate(
       await ctx.sendCommand('Network.setBlockedURLs', { urls: [] }, sess);
       await ctx.sendCommand('Network.setExtraHTTPHeaders', { headers: {} }, sess);
     } catch { /* ok */ }
+    rulesState(ctx).delete(sess);
     try {
       await ctx.sendCommand('Security.enable', {}, sess);
       await ctx.sendCommand('Security.setIgnoreCertificateErrors', { ignore: false }, sess);
@@ -304,10 +347,14 @@ async function handleEmulate(
     if (await byRuleCapable(ctx, sess)) {
       if (params.networkCondition === 'none') {
         await ctx.sendCommand('Network.emulateNetworkConditionsByRule', { matchedNetworkConditions: [] }, sess);
+        rulesState(ctx).set(sess, []);
       } else {
+        const presetRule = presetToConditions(preset);
         await ctx.sendCommand('Network.emulateNetworkConditionsByRule', {
-          matchedNetworkConditions: [presetToConditions(preset)],
+          matchedNetworkConditions: [presetRule],
         }, sess);
+        // Presets ride the same transport — expose them through the rule list.
+        rulesState(ctx).set(sess, [presetRule]);
       }
       // Legacy emulateNetworkConditions affected navigator state; keep that
       // observable behavior byte-compat (canary A2/A6 evidence).
@@ -337,10 +384,53 @@ async function handleEmulate(
     if (await byRuleCapable(ctx, sess)) {
       // Precedence (locked in plan): explicit networkRules win over presets
       await ctx.sendCommand('Network.emulateNetworkConditionsByRule', { matchedNetworkConditions: conds }, sess);
+      rulesState(ctx).set(sess, conds);
       results.push(`Network rules: ${conds.length} rule(s), first-match-wins`);
     } else {
-      return fail('Network.emulateNetworkConditionsByRule is not supported on this browser (requires Chrome 152+). Update Chrome/Brave to use per-request network rules.');
+      return byRuleUnsupported();
     }
+  }
+
+  // ── Network rules: append (WSD — re-push the whole list atomically) ──
+  if (params.networkRulesAppend !== undefined) {
+    const v = validateNetworkConditions(params.networkRulesAppend);
+    if (v.error) return fail(`Invalid networkRulesAppend entry: ${v.error}`);
+    const map = rulesState(ctx);
+    const next = [...(map.get(sess) ?? []), v.entry!];
+    await ctx.sendCommand('Network.enable', {}, sess);
+    if (!(await byRuleCapable(ctx, sess))) return byRuleUnsupported();
+    await ctx.sendCommand('Network.emulateNetworkConditionsByRule', { matchedNetworkConditions: next }, sess);
+    map.set(sess, next);
+    results.push(`Network rules: appended (${next.length} active), first-match-wins`);
+  }
+
+  // ── Network rules: remove by index (WSD — re-push remainder atomically) ──
+  if (params.networkRulesRemove !== undefined) {
+    const rawIdx = params.networkRulesRemove;
+    const map = rulesState(ctx);
+    const current = map.get(sess) ?? [];
+    const range = current.length === 0 ? 'none' : `0-${current.length - 1}`;
+    if (typeof rawIdx !== 'number' || !Number.isInteger(rawIdx)) {
+      return fail(`networkRulesRemove must be an integer index; active rules: ${range}.`);
+    }
+    if (rawIdx < 0 || rawIdx >= current.length) {
+      return fail(`networkRulesRemove index ${rawIdx} is out of range — active rules: ${range} (call emulate networkRulesList: true to see them).`);
+    }
+    const next = current.filter((_, i) => i !== rawIdx);
+    await ctx.sendCommand('Network.enable', {}, sess);
+    if (!(await byRuleCapable(ctx, sess))) return byRuleUnsupported();
+    await ctx.sendCommand('Network.emulateNetworkConditionsByRule', { matchedNetworkConditions: next }, sess);
+    map.set(sess, next);
+    results.push(next.length === 0
+      ? 'Network rules: removed — none remaining (native conditions restored).'
+      : `Network rules: removed [${rawIdx}] (${next.length} active), first-match-wins`);
+  }
+
+  // ── Network rules: list (WSD — read-back lives in the rules' home) ──
+  if (params.networkRulesList === true) {
+    await ctx.sendCommand('Network.enable', {}, sess);
+    if (!(await byRuleCapable(ctx, sess))) return byRuleUnsupported();
+    results.push(renderRules(rulesState(ctx).get(sess) ?? []));
   }
 
   // ── Network state spoof (WS8 — Network.overrideNetworkState) ──
@@ -425,6 +515,9 @@ export function registerEmulateTools(
         '- cpuPerformance: CPU performance tier override (optional: low|mid|high|ultra; Chrome 153/154+)',
         '- networkCondition: Throttle network speed (optional: offline|slow3g|fast3g|slow4g|fast4g|none; uses Network.emulateNetworkConditionsByRule on Chrome 152+, legacy transport otherwise; cleared by reset)',
         '- networkRules: Per-request throttle rules (optional: array of {urlPattern? (empty=all, absolute https URLPattern otherwise), latency, downloadThroughput, uploadThroughput, packetLoss?}; first-match wins; Chrome 152+; cleared by reset)',
+        '- networkRulesList: List the active per-request rules with indices + evaluation order (optional: true; read-back only, no CDP mutation; Chrome 152+)',
+        '- networkRulesAppend: Append ONE rule (same shape as a networkRules entry) and re-push the whole list in one ByRule call (optional: object; Chrome 152+)',
+        '- networkRulesRemove: Remove the rule at this index and re-push the remainder in one ByRule call (optional: number; Chrome 152+)',
         '- overrideNetworkState: Spoof navigator.onLine/connection (optional: boolean; true=offline, false=online; Network.overrideNetworkState, Chrome 152+; cleared by reset)',
         '- inputVisualization: Show click markers on the page (optional: boolean; Page.setInputVisualization, Chrome 153+; cleared by reset)',
         '- ignoreSSL: Bypass SSL certificate errors (optional: boolean)',
@@ -482,6 +575,20 @@ export function registerEmulateTools(
               required: ['latency', 'downloadThroughput', 'uploadThroughput'],
             },
           },
+          networkRulesList: { type: 'boolean', description: 'List the active per-request rules with indices + first-match evaluation order. Read-back only (no CDP mutation).' },
+          networkRulesAppend: {
+            type: 'object',
+            description: 'Append ONE validated rule to the active list and re-push the whole list in one ByRule call (Chrome 152+). Same shape as a networkRules entry.',
+            properties: {
+              urlPattern: { type: 'string', description: "Absolute URLPattern ('https://…') or empty string for match-all." },
+              latency: { type: 'number', description: 'Minimum latency in ms.' },
+              downloadThroughput: { type: 'number', description: 'Max aggregated download bytes/sec (-1 disables).' },
+              uploadThroughput: { type: 'number', description: 'Max aggregated upload bytes/sec (-1 disables).' },
+              packetLoss: { type: 'number', description: 'WebRTC packet loss percent 0-100 (optional).' },
+            },
+            required: ['latency', 'downloadThroughput', 'uploadThroughput'],
+          },
+          networkRulesRemove: { type: 'number', description: 'Remove the rule at this index from the active list and re-push the remainder in one ByRule call (Chrome 152+).' },
           overrideNetworkState: { type: 'boolean', description: 'Spoof navigator.onLine/connection state (true=offline, false=online; Chrome 152+; cleared by reset).' },
           inputVisualization: { type: 'boolean', description: 'Show click markers on the page (Page.setInputVisualization; cleared by reset).' },
           ignoreSSL: { type: 'boolean', description: 'Ignore SSL certificate errors.' },

@@ -9,6 +9,7 @@ import type { ToolRegistry } from './registry.js';
 import type { ServerContext, ToolResult } from '../types.js';
 import { defineTool } from './base-tool.js';
 import { ok, fail } from '../utils/helpers.js';
+import { resolveLocatorMatches, LOCATOR_SYNTAX_DOC } from '../utils/locators.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -109,19 +110,10 @@ async function handleCall(
     const obj = resolveResult.object as Record<string, unknown> | undefined;
     objectId = obj?.objectId as string | undefined;
   } else if (params.selector) {
-    // Use DOM + querySelector path
-    const doc = (await ctx.sendCommand('DOM.getDocument', { depth: 0 }, sess)) as Record<string, unknown>;
-    const root = doc.root as Record<string, unknown>;
-    const qResult = (await ctx.sendCommand('DOM.querySelector', {
-      nodeId: root.nodeId,
-      selector: params.selector as string,
-    }, sess)) as Record<string, unknown>;
-    if (!qResult.nodeId) return fail(`No element matches selector "${params.selector}".`);
-    const resolved = (await ctx.sendCommand('DOM.resolveNode', {
-      nodeId: qResult.nodeId,
-    }, sess)) as Record<string, unknown>;
-    const obj = resolved.object as Record<string, unknown> | undefined;
-    objectId = obj?.objectId as string | undefined;
+    // 5.5 WSA: locator engines ride the same selector param
+    const matches = await resolveLocatorMatches(ctx, sess, params.selector as string, 1);
+    if (matches.length === 0) return fail(`No element matches selector "${params.selector}".`);
+    objectId = matches[0].objectId;
   } else {
     return fail("Provide 'uid' or 'selector' to identify the target element.");
   }
@@ -177,7 +169,7 @@ export function registerExecuteTools(
           code: { type: 'string', description: 'JS function body for script (wrapped in async IIFE).' },
           function: { type: 'string', description: "JS function for call, receives element as arg. E.g. '(el) => el.textContent'" },
           uid: { type: 'number', description: 'Element uid for call.' },
-          selector: { type: 'string', description: 'CSS selector for call.' },
+          selector: { type: 'string', description: 'Element locator for call. ' + LOCATOR_SYNTAX_DOC },
           sessionId: { type: 'string', description: 'Agent session ID for tab ownership and isolation. Tabs are locked to sessions. Default: per-process UUID.' },
           cleanupStrategy: { type: 'string', enum: ['close', 'detach', 'none'], description: "Tab cleanup on session expiry. 'detach' (default) keeps tabs open, 'close' removes them, 'none' skips cleanup. Sticky per session." },
           exclusive: { type: 'boolean', description: 'Lock tab to this session (default: true). Set false to allow shared access.' },

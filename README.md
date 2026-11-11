@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/cdp-mcp-server"><img src="https://img.shields.io/npm/v/cdp-mcp-server" alt="npm version"></a>
   <img src="https://img.shields.io/badge/tools-15-green" alt="Tools">
-  <img src="https://img.shields.io/badge/sub--actions-130-green" alt="Actions">
+  <img src="https://img.shields.io/badge/sub--actions-131-green" alt="Actions">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="License">
 </p>
@@ -38,7 +38,21 @@ CDP Browser MCP Server connects to your **already-running** browser over a WebSo
 | Browser Use needs Python + LLM key | Heavy framework, double LLM cost |
 | BrowserTools MCP is read-only | Can observe but can't automate |
 
-**This server**: connects to Chrome on `localhost:9222`, uses the real browser state, and gives you **130 automation actions** across 15 tools - built as a modular TypeScript codebase with 2 dependencies. Geolocation spoofing automatically grants browser permissions so permission-based sites just work.
+**This server**: connects to Chrome on `localhost:9222`, uses the real browser state, and gives you **131 automation actions** across 15 tools - built as a modular TypeScript codebase with 2 dependencies. Geolocation spoofing automatically grants browser permissions so permission-based sites just work.
+
+---
+
+## What's New in v5.5.0 — Locator Parity & Final Maintenance Release
+
+> Full details in [CHANGELOG.md](CHANGELOG.md). Release notes: [v5.5.0](https://github.com/Tushar49/cdp-browser-mcp/releases/tag/v5.5.0).
+
+| Feature | Description |
+|---------|-------------|
+| 🎯 **Playwright-style locators** | Every `selector` now accepts `css=`, `xpath=`/bare `//`, `text=`, `role=`, `label=`, `placeholder=`, `testid=`, `alt=`, `title=` — with open-shadow-DOM piercing, strict-mode disambiguation (`>> nth=`, `>> first`, `>> last`), and actionable ambiguity errors. Wired through click/fill/wait/verify/execute |
+| ⏱️ **Interaction latency (INP)** | `observe perf_start` with `categories: ["v8"]` captures EventTiming interactions during the window; `perf_stop` renders the top 3 by duration with their processing windows — honest guidance when input was absent |
+| 🧬 **Heap diff + raw trace** | `observe heap_diff` diffs two `.heapsnapshot` files by self size (NEW / GONE / GROWN / SHRUNK, exact-size breakdown, separate ≈ buckets; no "retained" claim). `perf_start keepRaw: true` streams every raw trace event to a JSONL temp file |
+| 🛠️ **ByRule rule UX** | `emulate` gains `networkRulesList` (indexed first-match order), `networkRulesAppend`, and `networkRulesRemove` — each mutation re-pushes the whole rule list in one atomic CDP call |
+| 🧊 **Maintenance mode** | 5.5.0 is the final planned development cycle. New work now arrives only as issues; the tool contract is stable and additive-only |
 
 ---
 
@@ -60,7 +74,7 @@ CDP Browser MCP Server connects to your **already-running** browser over a WebSo
 | 🚫 **Modal State System** | Dialogs and file choosers block other tools with recovery instructions |
 | ⚡ **Lazy CDP Domains** | Domains enabled on first use, not at connect time — faster startup |
 | 📊 **Snapshot Caching** | Per-tab cache for snapshot reuse — reduces redundant tree captures |
-| 🤖 **Agent Guidance** | All 14 tool descriptions include usage guidance and common pitfalls |
+| 🤖 **Agent Guidance** | All 15 tool descriptions include usage guidance and common pitfalls |
 | 🧹 **Default: Detach** | Tabs never auto-close when session expires — agents can't accidentally kill your tabs |
 | 🖼️ **Cross-Origin Iframes** | OOP iframes auto-discovered via `Target.setAutoAttach` — visible in snapshots with `[frame N]` prefixes |
 | 📂 **File Chooser Interception** | Programmatic uploads via `Page.handleFileChooser`, popup monitoring for Google Picker/Dropbox |
@@ -77,7 +91,7 @@ CDP Browser MCP Server connects to your **already-running** browser over a WebSo
 | Connects to real browser | **Yes** | Via flag only | No (cloud) | No | Read-only |
 | Preserves cookies/sessions | **Yes** | No | No | No | Yes |
 | Works with extensions | **Yes** | No | No | No | Yes |
-| Tool count | **15 tools, 130 actions** | ~30 tools | ~10 tools | 7 tools | ~13 tools |
+| Tool count | **15 tools, 131 actions** | ~30 tools | ~10 tools | 7 tools | ~13 tools |
 | Auto-connect | **Yes** (first tool call) | No | N/A | No | No |
 | Auto-waiting after actions | **Yes** | Yes | Yes | No | N/A |
 | Smart form filling | **Yes** (combobox, React Select) | Native `<select>` only | Via AI | No | No |
@@ -86,8 +100,9 @@ CDP Browser MCP Server connects to your **already-running** browser over a WebSo
 | HTTP request mocking | **Yes** | No | No | No | No |
 | Cookie/storage management | **Yes** (full CRUD) | File-based | Cloud profiles | User data dir | No |
 | Device emulation | **Yes** (15 options) | Partial | Limited | No | No |
-| Network throttling | **Yes** (6 presets) | No | No | No | No |
-| Performance metrics | **Yes** (DOM, heap, paint) | No | No | No | Lighthouse |
+| Network throttling | **Yes** (6 presets + per-request rules) | No | No | No | No |
+| Performance metrics | **Yes** (DOM, heap, paint + LCP/CLS trace insights) | No | No | No | Lighthouse |
+| Heap snapshot dump + offline analysis | **Yes** (self-size top-N, detachedness, GC-root paths) | No | No | No | No |
 | PDF export | **Yes** | Yes | No | No | No |
 | File upload | **Yes** | Yes | No | No | No |
 | Drag & drop | **Yes** | Yes | No | No | No |
@@ -299,11 +314,11 @@ When a connection fails, the server auto-detects the failure mode and prints the
 |------|---------|-------------|
 | `tabs` | 7 | Tab management — list, find, open, close, activate, info, set profile |
 | `page` | 24 | Navigation, snapshots, screenshots, content extraction (incl. parsed annotated-tree), pass/fail verify checks, page-registered WebMCP passthrough, PDF, dialogs, frames, find-in-page, screen recording (MP4) |
-| `interact` | 12 | Click, hover, type, fill, select, press, drag, scroll, upload, focus, check, tap |
+| `interact` | 17 | Click, hover, type, fill, select, press, drag, scroll, upload, focus, check, tap — every selector accepts Playwright-style engines (`css/xpath/text/role/label/placeholder/testid/alt/title`) with shadow piercing + strict mode |
 | `form` | 3 | Smart form filling engine — fill, read, clear; handles text, combobox, checkbox, radio, select, date in one call |
 | `execute` | 3 | JavaScript evaluation — expressions, async scripts, element-scoped calls |
-| `observe` | 11 | Console messages, network requests, performance metrics, render-performance insights (LCP/CLS), memory counters, heap dump + offline summary, downloads, HAR export |
-| `emulate` | 18 | Viewport, color scheme, geolocation, network throttling (presets ride per-request ByRule rules on Chrome 152+), per-request `networkRules`, timezone, locale, vision deficiency, device posture, CPU performance tier, click-marker visualization, navigator network-state spoof |
+| `observe` | 12 | Console messages, network requests, performance metrics, render-performance insights (LCP/CLS/interaction latency), memory counters, heap dump + offline summary + two-file heap diff, downloads, HAR export |
+| `emulate` | 24 | Viewport, color scheme, geolocation, network throttling (presets ride per-request ByRule rules on Chrome 152+), per-request `networkRules` plus list/append/remove, timezone, locale, vision deficiency, device posture, CPU performance tier, click-marker visualization, navigator network-state spoof |
 | `storage` | 11 | Cookie CRUD (incl. CHIPS `partitionKey` set/delete + `| partitioned:` display in listings), localStorage/sessionStorage management, storage clearing, quota inspection, auth-state export/import (partitionKey round-trips) |
 | `webauthn` | 12 | Passkey testing with virtual authenticators — create/inject credentials, credential-property mutation, presence + UV simulation, negative-testing override bits |
 | `intercept` | 6 | HTTP request interception — mock, modify, block network requests |
@@ -681,7 +696,7 @@ WebSocket ping/pong every 30 seconds. If 2 consecutive pings fail, the connectio
 | `CDP_PROFILE` | — | Auto-connect to Chrome instance by name or User Data path on first tool call (lazy, not at startup) |
 | `CDP_USER_DATA` | — | Extra User Data directory checked first during discovery |
 | `CDP_PROCESS_SCAN` | `true` | Scan running browser processes' command lines for `--user-data-dir` / `--remote-debugging-port` during discovery. Set `false` to disable |
-| `CDP_SLIM_MODE` | `false` | Enable slim mode: 6 Playwright-compatible tools instead of 14. Ideal for 32K-context models |
+| `CDP_SLIM_MODE` | `false` | Enable slim mode: 6 Playwright-compatible tools instead of 15. Ideal for 32K-context models |
 
 ---
 

@@ -1,6 +1,6 @@
 # cdp-browser-mcp — AGENTS.md
 
-**Branches:** main (public) · dev (working) · **Version:** 5.3.0
+**Branches:** main (public) · dev (working) · **Version:** 5.5.0 · **Maintenance mode since 5.5** (new work arrives only as issues)
 Contributor + agent guide for this repo — identical file on both branches.
 Short on purpose — details live in
 CONTRIBUTING.md (workflow), README.md (product), CHANGELOG.md (history).
@@ -22,7 +22,7 @@ Chrome CDP-based MCP server. Connects to the user's **real running browser**
 │   ├── src/connection/        # CDP client, health monitor, browser discovery
 │   ├── src/session/           # session manager, tab ownership, modal state
 │   ├── src/snapshot/          # accessibility snapshots, element refs, token optimizer
-│   ├── src/tools/             # 15 tools / 130 actions (registry.ts wires all)
+│   ├── src/tools/             # 15 tools / 131 actions (registry.ts wires all)
 │   ├── src/utils/             # wait, retry, errors, response builder
 │   ├── src/__tests__/         # unit + integration + benchmarks
 │   └── server.js              # REMOVED in v5 alpha.4 (parked: _archive/legacy-server-v4.js, dev-only)
@@ -110,7 +110,7 @@ Always:
 2. Conventional commits: `feat:` `fix:` `refactor:` `docs:` `chore:`.
 3. User-facing change → CHANGELOG.md entry.
 4. New/changed tool → README.md tool listing + agent-friendly description.
-5. Version bumps only via release flow (package.json + `VERSION` in `src/index.ts` together). The release commit must also update every user-facing count: README.md badges at the top (tools/sub-actions — the version badge is npm-driven and self-updates) and the tools table — these were missed for BOTH the 5.1.0 and 5.2.0 releases (badges sat at 5.0.3/14/90+ on main until caught post-release).
+5. Version bumps only via release flow (package.json + `VERSION` in `src/version.ts` together). The release commit must also update every user-facing count: README.md badges at the top (tools/sub-actions — the version badge is npm-driven and self-updates) and the tools table — these were missed for BOTH the 5.1.0 and 5.2.0 releases (badges sat at 5.0.3/14/90+ on main until caught post-release).
 
 Never:
 1. Don't run `_archive/legacy-server-v4.js` (frozen, reference only).

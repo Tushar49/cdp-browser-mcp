@@ -392,6 +392,14 @@ export interface ServerContext {
   heapDumps: Map<string, HeapDumpState>;
 
   /**
+   * Per-session active ByRule network-condition rules (sessionId → ordered
+   * rule list), maintained by emulate so `networkRulesList` can render the
+   * effective first-match order (5.5 WSD). CDP has no read-back for ByRule
+   * rules — emulate is the rules' home and is the single writer.
+   */
+  networkRulesBySession: Map<string, Array<Record<string, unknown>>>;
+
+  /**
    * WebMCP page-registered tool registry (CDP sessionId → toolName → info),
    * populated by the event pipeline from WebMCP.toolsAdded/toolsRemoved
    * (5.3 WS3). Discovery is event-driven — the protocol has no listing

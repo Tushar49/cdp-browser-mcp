@@ -175,3 +175,84 @@ describe('emulate WS8 — overrideNetworkState + reset', () => {
     expect(send.mock.calls.map((c) => c[0])).toContain('Network.emulateNetworkConditions');
   });
 });
+
+describe('emulate WSD — ByRule rule-list UX (list / append / remove)', () => {
+  let registry: ToolRegistry;
+  beforeEach(() => { registry = new ToolRegistry(); registerEmulateTools(registry, {} as ServerContext); });
+
+  const A = { urlPattern: 'https://a.example/*', latency: 10, downloadThroughput: -1, uploadThroughput: -1 };
+  const B = { latency: 500, downloadThroughput: 80000, uploadThroughput: -1 };
+  const C = { urlPattern: 'https://c.example/*', latency: 20, downloadThroughput: 1000, uploadThroughput: 1000 };
+
+  it('networkRulesList renders indices + first-match order after a full replace', async () => {
+    const { ctx, send } = makeCtx();
+    await registry.dispatch('emulate', args({ networkRules: [A, B] }), ctx);
+    send.mockClear();
+    const res = await registry.dispatch('emulate', args({ networkRulesList: true }), ctx);
+    const t = textOf(res);
+    expect(t).toContain('Network rules: 2 active, first-match-wins');
+    expect(t).toContain('[0] urlPattern="https://a.example/*"');
+    expect(t).toContain('[1] urlPattern="" (match all)');
+    expect(t).toContain('latency 500ms');
+    // read-back only — never re-pushes
+    expect(send.mock.calls.map((c) => c[0])).not.toContain('Network.emulateNetworkConditionsByRule');
+  });
+
+  it('networkRulesList exposes a preset applied through networkCondition', async () => {
+    const { ctx } = makeCtx({ byRule: true });
+    await registry.dispatch('emulate', args({ networkCondition: 'slow3g' }), ctx);
+    const t = textOf(await registry.dispatch('emulate', args({ networkRulesList: true }), ctx));
+    expect(t).toContain('Network rules: 1 active');
+    expect(t).toContain('latency 2000ms');
+    expect(t).toContain('down 50000B/s');
+  });
+
+  it('networkRulesAppend re-pushes the whole list in ONE ByRule call', async () => {
+    const { ctx, send } = makeCtx();
+    await registry.dispatch('emulate', args({ networkRules: [A] }), ctx);
+    send.mockClear();
+    const res = await registry.dispatch('emulate', args({ networkRulesAppend: C }), ctx);
+    expect(textOf(res)).toContain('appended (2 active)');
+    const calls = send.mock.calls.filter((c) => c[0] === 'Network.emulateNetworkConditionsByRule');
+    expect(calls).toHaveLength(1);
+    const conds = calls[0][1].matchedNetworkConditions;
+    expect(conds).toHaveLength(2);
+    expect(conds[0].urlPattern).toBe(A.urlPattern);
+    expect(conds[1].urlPattern).toBe(C.urlPattern);
+  });
+
+  it('networkRulesRemove removes by index and re-pushes the remainder in ONE call', async () => {
+    const { ctx, send } = makeCtx();
+    await registry.dispatch('emulate', args({ networkRules: [A, B, C] }), ctx);
+    send.mockClear();
+    const res = await registry.dispatch('emulate', args({ networkRulesRemove: 1 }), ctx);
+    expect(textOf(res)).toContain('removed [1] (2 active)');
+    const calls = send.mock.calls.filter((c) => c[0] === 'Network.emulateNetworkConditionsByRule');
+    expect(calls).toHaveLength(1);
+    const conds = calls[0][1].matchedNetworkConditions;
+    expect(conds.map((x: { urlPattern: string }) => x.urlPattern)).toEqual([A.urlPattern, C.urlPattern]);
+
+    const t = textOf(await registry.dispatch('emulate', args({ networkRulesList: true }), ctx));
+    expect(t).toContain('[0] urlPattern="https://a.example/*"');
+    expect(t).toContain('[1] urlPattern="https://c.example/*"');
+  });
+
+  it('out-of-range remove fails actionably with the valid range and no ByRule call', async () => {
+    const { ctx, send } = makeCtx();
+    await registry.dispatch('emulate', args({ networkRules: [A] }), ctx);
+    send.mockClear();
+    const res = await registry.dispatch('emulate', args({ networkRulesRemove: 5 }), ctx);
+    expect(textOf(res)).toContain('index 5 is out of range');
+    expect(textOf(res)).toContain('0-0');
+    expect(send.mock.calls.map((c) => c[0])).not.toContain('Network.emulateNetworkConditionsByRule');
+  });
+
+  it('append validates with the same rules as a full replace', async () => {
+    const { ctx } = makeCtx();
+    const res = await registry.dispatch('emulate', args({
+      networkRulesAppend: { urlPattern: '/relative/*', latency: 1, downloadThroughput: -1, uploadThroughput: -1 },
+    }), ctx);
+    expect(textOf(res)).toContain('Invalid networkRulesAppend entry');
+    expect(textOf(res)).toContain('must be an absolute URL pattern');
+  });
+});

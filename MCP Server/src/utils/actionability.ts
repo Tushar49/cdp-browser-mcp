@@ -16,6 +16,7 @@
  */
 
 import { ActionableError } from './error-handler.js';
+import { buildLocatorFirstElementExpression } from './locators.js';
 
 export type ActionabilityState = 'visible' | 'stable' | 'enabled' | 'editable';
 
@@ -64,7 +65,18 @@ const CHECK_BODY = `
     const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
     let hitOk = true, hitTag = '';
     if (visible) {
-      const hit = document.elementFromPoint(cx, cy);
+      // 5.5 WSA: document.elementFromPoint returns the shadow HOST for nodes
+      // inside open shadow roots — descend into each open shadow root so the
+      // hit-target check sees the actual element.
+      let hit = document.elementFromPoint(cx, cy);
+      let probe = hit;
+      while (probe && probe.shadowRoot) {
+        let inner = null;
+        try { inner = probe.shadowRoot.elementFromPoint(cx, cy); } catch (e) { inner = null; }
+        if (!inner || inner === probe) break;
+        probe = inner;
+      }
+      hit = probe;
       hitTag = hit ? hit.tagName.toLowerCase() : '(nothing)';
       hitOk = !!hit && (hit === el || el.contains(hit) || hit.contains(el));
     }
@@ -84,7 +96,7 @@ const CALL_FN_WRAPPER = `function(prevBoxJson) {
 
 const EVALUATE_WRAPPER = (selector: string, prevBoxJson: string) => `(() => {
   ${CHECK_BODY}
-  const el = document.querySelector(${JSON.stringify(selector)});
+  const el = ${buildLocatorFirstElementExpression(selector)};
   if (!el) return { present: false };
   const prevBox = ${prevBoxJson ? `JSON.parse(${JSON.stringify(prevBoxJson)})` : 'null'};
   return __cdpActionabilityCheck(el, prevBox);
@@ -113,6 +125,7 @@ export async function retryWithLadder<T>(
     try {
       return await fn(attempt++);
     } catch (e) {
+      if ((e as { nonRetriable?: boolean } | null)?.nonRetriable) throw e;
       lastError = e;
     }
     const remaining = deadline - Date.now();
@@ -255,7 +268,7 @@ export async function scrollIntoViewIfNeeded(
     }
     await send('Runtime.evaluate', {
       expression:
-        `(function(){ const el = document.querySelector(${JSON.stringify(target.selector ?? '')});` +
+        `(function(){ const el = ${buildLocatorFirstElementExpression(target.selector ?? '')};` +
         ` if (el && el.scrollIntoViewIfNeeded) el.scrollIntoViewIfNeeded(true);` +
         ` else if (el) el.scrollIntoView({ block: 'center' }); })()`,
     }, sess);
