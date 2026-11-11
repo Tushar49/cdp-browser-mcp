@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>WSA locator gate rig</title>
+  <style>
+    body { font: 14px system-ui; padding: 16px; }
+    button, input, [role], img { display: block; margin: 6px 0; }
+    img { width: 48px; height: 48px; }
+  </style>
+</head>
+<body>
+  <h1>WSA locator gate</h1>
+  <script>window.__HITS = []; function hit(k) { window.__HITS.push(k); }</script>
+
+  <button id="css-target" onclick="hit('css')">CSS Target</button>
+  <button id="xpath-target" onclick="hit('xpath')">XPath Target</button>
+  <button id="text-target" onclick="hit('text')">UniqueTextTarget</button>
+  <div role="tab" id="role-target" onclick="hit('role')" tabindex="0">RoleTab</div>
+  <input id="label-target" aria-label="Email Address" />
+  <input id="placeholder-target" placeholder="Search Products" />
+  <button id="testid-target" data-testid="submit-btn" onclick="hit('testid')">SubmitBtn</button>
+  <img id="alt-target" alt="Company Logo" onclick="hit('alt')"
+       src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" />
+  <button id="title-target" title="Tooltip Button" onclick="hit('title')">Tip</button>
+
+  <div id="shadow-host"></div>
+  <script>
+    (function () {
+      var root = document.getElementById('shadow-host').attachShadow({ mode: 'open' });
+      root.innerHTML =
+        '<button id="shadow-btn">ShadowButton</button>' +
+        '<input id="shadow-input" placeholder="Shadow Search" />';
+      root.getElementById('shadow-btn').addEventListener('click', function () {
+        window.__HITS.push('shadow');
+      });
+    })();
+  </script>
+
+  <button class="dup" onclick="hit('dup0')">Ambiguous</button>
+  <button class="dup" onclick="hit('dup1')">Ambiguous</button>
+
+  <div id="late-slot"></div>
+  <script>
+    setTimeout(function () {
+      var b = document.createElement('button');
+      b.textContent = 'LateButton';
+      b.addEventListener('click', function () { window.__HITS.push('late'); });
+      document.getElementById('late-slot').appendChild(b);
+    }, 900);
+  </script>
+</body>
+</html>

@@ -5,6 +5,8 @@
  * text polling, selector polling, and post-action network settling.
  */
 
+import { buildLocatorStateExpression } from './locators.js';
+
 // ─── Types ──────────────────────────────────────────────────────────
 
 /** Function signature for sending CDP commands. */
@@ -165,8 +167,12 @@ export async function waitForTextGone(
 // ─── waitForSelector ────────────────────────────────────────────────
 
 /**
- * Poll until a CSS selector matches an element in the specified state,
+ * Poll until a selector matches an element in the specified state,
  * or timeout expires.  Mirrors Playwright's `locator.waitFor({ state })`.
+ *
+ * Accepts every 5.5 locator engine (`text=`, `role=`, `label=`,
+ * `placeholder=`, `testid=`, `alt=`, `title=`, `//xpath`, `css=`) in addition
+ * to plain CSS.
  */
 export async function waitForSelector(
   cdpSend: CdpSend,
@@ -177,20 +183,9 @@ export async function waitForSelector(
 ): Promise<boolean> {
   const start = Date.now();
 
-  let expr: string;
-  switch (state) {
-    case 'detached':
-      expr = `!document.querySelector(${JSON.stringify(selector)})`;
-      break;
-    case 'hidden':
-      expr = `(() => { const el = document.querySelector(${JSON.stringify(selector)}); return !el || el.offsetParent === null || getComputedStyle(el).visibility === 'hidden' || getComputedStyle(el).display === 'none'; })()`;
-      break;
-    case 'visible':
-      expr = `(() => { const el = document.querySelector(${JSON.stringify(selector)}); return el && el.offsetParent !== null && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none'; })()`;
-      break;
-    default: // 'attached'
-      expr = `!!document.querySelector(${JSON.stringify(selector)})`;
-  }
+  // 5.5 WSA: locator engines (css/text=/role=/label=/placeholder=/testid=/
+  // alt=/title=/xpath) ride the same selector string as before.
+  const expr = buildLocatorStateExpression(selector, state);
 
   while (Date.now() - start < timeout) {
     try {

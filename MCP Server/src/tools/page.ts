@@ -18,6 +18,7 @@ import { ok, fail } from '../utils/helpers.js';
 import { ActionableError, Errors, wrapError } from '../utils/error-handler.js';
 import { sleep, waitForReadyState, waitForText, waitForTextGone, waitForSelector } from '../utils/wait.js';
 import type { WaitUntil, SelectorState } from '../utils/wait.js';
+import { buildLocatorFirstElementExpression, buildLocatorMatchesExpression, LOCATOR_SYNTAX_DOC } from '../utils/locators.js';
 import { TempFileManager } from '../utils/temp-files.js';
 import { isMethodMissingError } from '../connection/capabilities.js';
 import type { AXNode } from '../snapshot/accessibility.js';
@@ -607,7 +608,7 @@ async function handleContent(ctx: ServerContext, args: PageArgs): Promise<ToolRe
     }
     if (args.selector) {
       const result = await ctx.sendCommand('Runtime.evaluate', {
-        expression: `document.querySelector(${JSON.stringify(args.selector)})?.${prop} ?? '(not found)'`,
+        expression: `(${buildLocatorMatchesExpression(args.selector)})[0]?.${prop} ?? '(not found)'`,
         returnByValue: true,
       }, sess) as { result: { value: string } };
       return ok(result.result.value ?? '(empty)');
@@ -680,7 +681,7 @@ type VerifyCheck = 'visible' | 'text' | 'url' | 'enabled' | 'title' | 'value';
 
 const VERIFY_CHECKS: VerifyCheck[] = ['visible', 'text', 'url', 'enabled', 'title', 'value'];
 
-/** Same probe shape for uid (callFunctionOn on the resolved node) and selector (document.querySelector). */
+/** Same probe shape for uid (callFunctionOn on the resolved node) and selector (locator engine, first match). */
 interface ElementProbe {
   found: boolean;
   visible?: boolean;
@@ -704,7 +705,7 @@ const ELEMENT_PROBE_FN = `function() {
 
 function selectorProbeExpression(selector: string): string {
   return `(() => {
-    const el = document.querySelector(${JSON.stringify(selector)});
+    const el = ${buildLocatorFirstElementExpression(selector)};
     if (!el) return { found: false };
     let visible = false;
     try { visible = el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none'; } catch (e) { visible = false; }
@@ -1299,7 +1300,7 @@ const PAGE_INPUT_SCHEMA = {
     interactive: { type: 'boolean' as const, description: 'If true, return only interactive elements (buttons, inputs, links, dropdowns). Reduces snapshot size for small-context models.' },
     search: { type: 'string' as const, description: 'Filter snapshot to elements whose name, value, or description matches this text (case-insensitive).' },
     maxLength: { type: 'number' as const, description: 'Maximum characters in snapshot output (default: 20000). Use lower values (e.g. 8000) for small-context models.' },
-    selector: { type: 'string' as const, description: 'CSS selector for content/wait.' },
+    selector: { type: 'string' as const, description: 'Element locator for content/wait/verify. ' + LOCATOR_SYNTAX_DOC },
     format: {
       type: 'string' as const,
       enum: ['text', 'html', 'full', 'annotated'] as const,

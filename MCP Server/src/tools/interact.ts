@@ -11,6 +11,7 @@ import type { ToolRegistry } from './registry.js';
 import { defineTool } from './base-tool.js';
 import { ok, fail, randomDelay, generateBezierPath } from '../utils/helpers.js';
 import { Errors, wrapError } from '../utils/error-handler.js';
+import { resolveLocatorStrict, LOCATOR_SYNTAX_DOC } from '../utils/locators.js';
 import { slimify } from './slim-mode.js';
 import {
   runActionabilityGate,
@@ -1114,7 +1115,7 @@ async function getTabSession(ctx: ServerContext, tabId: string): Promise<string>
 
 /**
  * Resolve an element's position and metadata for interaction.
- * Uses uid (preferred) or CSS selector to locate the element.
+ * Uses uid (preferred) or a locator (CSS + Playwright-style engines).
  */
 export async function resolveElement(
   ctx: ServerContext,
@@ -1175,23 +1176,8 @@ export async function resolveElement(
 
   if (!selector) throw new Error('Provide uid or selector to identify the element.');
 
-  const result = await ctx.sendCommand('Runtime.evaluate', {
-    expression: `(() => {
-      const el = document.querySelector(${JSON.stringify(selector)});
-      if (!el) return null;
-      const r = el.getBoundingClientRect();
-      return {
-        x: r.x + r.width / 2, y: r.y + r.height / 2,
-        w: r.width, h: r.height,
-        tag: el.tagName.toLowerCase(),
-        label: (el.getAttribute('aria-label') || el.textContent || '').trim().substring(0, 60),
-      };
-    })()`,
-    returnByValue: true,
-  }, sess) as { result: { value: ResolvedElement | null } };
-
-  if (!result.result.value) throw Errors.selectorNotFound(selector);
-  return result.result.value;
+  const strict = await resolveLocatorStrict(ctx, sess, selector);
+  return { ...strict.geometry, objectId: strict.objectId };
 }
 
 /**
@@ -1270,14 +1256,9 @@ async function resolveElementObjectId(
 
   if (!selector) throw new Error('Provide uid or selector to identify the element.');
 
-  const result = await ctx.sendCommand('Runtime.evaluate', {
-    expression: `document.querySelector(${JSON.stringify(selector)})`,
-    returnByValue: false,
-  }, sess) as { result: { objectId?: string } };
+  const strict = await resolveLocatorStrict(ctx, sess, selector);
 
-  if (!result.result?.objectId) throw Errors.selectorNotFound(selector);
-
-  return { objectId: result.result.objectId, resolvedSession: sess };
+  return { objectId: strict.objectId, resolvedSession: sess };
 }
 
 /**
@@ -1472,7 +1453,7 @@ const INTERACT_DESCRIPTION = [
   '- check: Set checkbox state (tabId, checked, uid/selector)',
   '- tap: Touch tap element (tabId, uid/selector)',
   '',
-  'Use uid (from snapshot) or CSS selector. UIDs preferred. Set humanMode:true for realistic mouse paths.',
+  'Use uid (from snapshot) or a locator (selector). UIDs preferred. Locators: ' + LOCATOR_SYNTAX_DOC + ' Set humanMode:true for realistic mouse paths.',
 ].join('\n');
 
 const INTERACT_INPUT_SCHEMA = {
@@ -1485,7 +1466,7 @@ const INTERACT_INPUT_SCHEMA = {
     },
     tabId: { type: 'string' as const, description: 'Tab ID.' },
     uid: { type: 'number' as const, description: 'Element uid from snapshot.' },
-    selector: { type: 'string' as const, description: 'CSS selector.' },
+    selector: { type: 'string' as const, description: 'Element locator. ' + LOCATOR_SYNTAX_DOC },
     button: {
       type: 'string' as const,
       enum: ['left', 'right', 'middle'] as const,
@@ -1506,7 +1487,7 @@ const INTERACT_INPUT_SCHEMA = {
     submit: { type: 'boolean' as const, description: 'Press Enter after typing.' },
     fields: {
       type: 'array' as const,
-      description: 'Fields for fill: [{uid, selector, value, type}].',
+      description: 'Fields for fill: [{uid, selector, value, type}]. selector accepts the locator syntax.',
       items: {
         type: 'object' as const,
         properties: {
@@ -1533,9 +1514,9 @@ const INTERACT_INPUT_SCHEMA = {
       description: 'Base delay in ms between words (spaces/newlines) for human-like typing. Actual delay randomized in [wordDelay, wordDelay*3]. Default 800ms.',
     },
     sourceUid: { type: 'number' as const, description: 'Drag source uid.' },
-    sourceSelector: { type: 'string' as const, description: 'Drag source selector.' },
+    sourceSelector: { type: 'string' as const, description: 'Drag source locator. ' + LOCATOR_SYNTAX_DOC },
     targetUid: { type: 'number' as const, description: 'Drag target uid.' },
-    targetSelector: { type: 'string' as const, description: 'Drag target selector.' },
+    targetSelector: { type: 'string' as const, description: 'Drag target locator. ' + LOCATOR_SYNTAX_DOC },
     direction: {
       type: 'string' as const,
       enum: ['up', 'down', 'left', 'right'] as const,
@@ -1556,7 +1537,7 @@ const INTERACT_INPUT_SCHEMA = {
       type: 'object' as const,
       description: 'Optional post-click wait. Skip a separate page.wait call. Provide one of: selector, text, textGone. Parity with Playwright MCP browser_click.',
       properties: {
-        selector: { type: 'string' as const, description: 'CSS selector to wait for after click.' },
+        selector: { type: 'string' as const, description: 'Locator to wait for after click. ' + LOCATOR_SYNTAX_DOC },
         text: { type: 'string' as const, description: 'Text to wait to appear in the page after click.' },
         textGone: { type: 'string' as const, description: 'Text to wait to disappear from the page after click.' },
         state: {
