@@ -17,6 +17,11 @@
  * args.data with an args.frame key; LayoutShift carries
  * {cumulative_score, had_recent_input, frame_max_distance,
  * impacted_nodes[{node_id, old_rect, new_rect}]}.
+ *
+ * 5.5 WSB: EventTiming is now a SHIPPED insight class (retry-GO in 5.4).
+ * It only surfaces when the `v8` category escalation is on AND real input
+ * occurs during the window (B1 `['devtools.timeline']` → ×0; B3/B5 with
+ * `['v8']` → ×32/×14). Output states the requirement honestly when absent.
  */
 
 /** Hard cap on raw trace events retained per recording (plan: never OOM). */
@@ -42,11 +47,14 @@ export interface PerfTraceRecording {
   maxChunkEvents: number;
   /** First few distinct event names seen, for zero-insight diagnoses. */
   sampleNames: string[];
+  /** True when perf_start escalated categories to include 'v8' (EventTiming gate). */
+  escalated: boolean;
 }
 
 export function createPerfTraceRecording(
   startedAt: number,
   url: string | null,
+  escalated = false,
 ): PerfTraceRecording {
   return {
     startedAt,
@@ -59,6 +67,7 @@ export function createPerfTraceRecording(
     chunkCount: 0,
     maxChunkEvents: 0,
     sampleNames: [],
+    escalated,
   };
 }
 
@@ -123,6 +132,8 @@ export interface TraceInsightOptions {
   chunkCount?: number;
   maxChunkEvents?: number;
   sampleNames?: string[];
+  /** True when the recording ran with the `v8` category escalation on. */
+  v8Category?: boolean;
 }
 
 export interface TraceInsights {
@@ -130,6 +141,8 @@ export interface TraceInsights {
   output: string;
   lcpCandidates: number;
   shiftCount: number;
+  /** 5.5 WSB: number of EventTiming interaction events aggregated. */
+  eventTimingCount: number;
 }
 
 /**
@@ -148,7 +161,7 @@ export function aggregateTraceInsights(
   opts: TraceInsightOptions,
 ): TraceInsights {
   const parsed = events.map(toEvent).filter(
-    (e): e is TraceEvent => e !== null && (e.name === 'largestContentfulPaint::Candidate' || e.name === 'LayoutShift'),
+    (e): e is TraceEvent => e !== null && (e.name === 'largestContentfulPaint::Candidate' || e.name === 'LayoutShift' || e.name === 'EventTiming'),
   );
 
   const t0Min = parsed.reduce<number | null>(
@@ -181,6 +194,30 @@ export function aggregateTraceInsights(
   }
   if (counted.length === 1) clsWorst = counted[0].score as number;
 
+  // ── WSB: EventTiming interactions (input-dependent, v8-gated) ──
+  interface Interaction {
+    type: string;
+    dur: number;
+    processingStart: number | null;
+    processingEnd: number | null;
+    ts?: number;
+  }
+  const interactions: Interaction[] = [];
+  for (const e of parsed) {
+    if (e.name !== 'EventTiming') continue;
+    const d = e.data ?? {};
+    const dur = typeof d.duration === 'number' ? d.duration : (typeof d.dur === 'number' ? d.dur : null);
+    if (dur === null || dur <= 0) continue;
+    interactions.push({
+      type: typeof d.type === 'string' ? d.type : '(unknown)',
+      dur,
+      processingStart: typeof d.processingStart === 'number' ? d.processingStart : null,
+      processingEnd: typeof d.processingEnd === 'number' ? d.processingEnd : null,
+      ts: e.ts,
+    });
+  }
+  const topInteractions = [...interactions].sort((a, b) => b.dur - a.dur).slice(0, 3);
+
   const lines: string[] = [];
   const durSec = (opts.stoppedAt - opts.startedAt) / 1000;
   const status: string[] = [];
@@ -192,9 +229,9 @@ export function aggregateTraceInsights(
 
   lines.push(`Performance insights (${status.length ? status.join('; ') : 'trace complete'}):`);
   if (opts.url) lines.push(`recording: ${opts.url}`);
-  lines.push(`duration: ${durSec.toFixed(1)}s | chunks: ${opts.chunkCount ?? '?'} (max ${opts.maxChunkEvents ?? '?'} events) | LCP/CLS-class events: ${parsed.length}`);
+  lines.push(`duration: ${durSec.toFixed(1)}s | chunks: ${opts.chunkCount ?? '?'} (max ${opts.maxChunkEvents ?? '?'} events) | LCP/CLS/EventTiming-class events: ${parsed.length}`);
   if (parsed.length === 0 && (opts.sampleNames?.length ?? 0) > 0) {
-    lines.push(`zero LCP/CLS events among the trace — names seen: ${opts.sampleNames!.slice(0, 6).join(', ')}`);
+    lines.push(`zero LCP/CLS/EventTiming events among the trace — names seen: ${opts.sampleNames!.slice(0, 6).join(', ')}`);
   } else if (parsed.length === 0) {
     lines.push('zero trace chunks reached the recording — the trace datasource produced nothing (session or build limitation).');
   }
@@ -224,10 +261,27 @@ export function aggregateTraceInsights(
     lines.push('CLS: no layout shifts captured — the emission caveat mirrors LCP (nondeterministic between runs; a zero-class stop can succeed on a retry).');
   }
 
+  // WSB: interaction latency (INP inputs) — input-dependent, v8-gated
+  lines.push('');
+  if (interactions.length > 0) {
+    lines.push(`Interaction latency — EventTiming top ${topInteractions.length} of ${interactions.length} by duration (INP inputs):`);
+    for (const it of topInteractions) {
+      const window = it.processingStart !== null && it.processingEnd !== null
+        ? `, processing ${it.processingStart.toFixed(1)}–${it.processingEnd.toFixed(1)}ms`
+        : '';
+      lines.push(`- ${it.type} — dur ${it.dur.toFixed(1)}ms${window}`);
+    }
+  } else if (opts.v8Category) {
+    lines.push('Interaction insights: v8 category was on but no EventTiming events were captured — interact with the page (click or keypress) during the recording to capture INP inputs.');
+  } else {
+    lines.push("Interaction insights: requires categories: ['v8'] and real input — restart with perf_start categories: ['v8'] and interact during the recording.");
+  }
+
   return {
     output: lines.join('\n'),
     lcpCandidates: lastPerFrame.size,
     shiftCount: clsEvents.length,
+    eventTimingCount: interactions.length,
   };
 }
 

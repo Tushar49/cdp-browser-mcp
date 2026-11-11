@@ -39,6 +39,10 @@ function lcpEvent(frame: string, ts: number, data: Record<string, unknown>) {
 function shiftEvent(ts: number, score: number, input = false) {
   return { name: 'LayoutShift', ts, cat: 'loading,rail', ph: 'I', args: { frame: 'F1', data: { cumulative_score: score, had_recent_input: input, impacted_nodes: [] } } };
 }
+/** WSB: EventTiming interaction event (real shape from B5: args.data carries type/duration/processing window). */
+function eventTimingEvent(ts: number, type: string, dur: number, processingStart: number, processingEnd: number, interactionId = 1) {
+  return { name: 'EventTiming', ts, cat: 'devtools.timeline', ph: 'I', args: { data: { interactionId, nodeId: 7, type, duration: dur, processingStart, processingEnd } } };
+}
 
 describe('observe WS10 — perf_start / perf_stop wiring', () => {
   let registry: ToolRegistry;
@@ -129,13 +133,37 @@ describe('observe WS10 — perf_start / perf_stop wiring', () => {
     const { ctx, send, perfTraces } = makeCtx();
     await registry.dispatch('observe', args({ action: 'perf_start', categories: ['v8'] }), ctx);
     const rule = send.mock.calls.find((c) => c[0] === 'Tracing.start')[1];
-    expect(rule.traceConfig.includedCategories).toEqual(['loading', 'v8']);
+    expect(rule.traceConfig.includedCategories).toEqual(['loading', 'v8', 'devtools.timeline']);
 
     const bad = await registry.dispatch('observe', args({ action: 'perf_start', categories: ['banana'] }), ctx);
     perfTraces.clear(); // drop the running recording so the guard doesn't shadow the validation error
     const bad2 = await registry.dispatch('observe', args({ action: 'perf_start', categories: ['banana'] }), ctx);
     expect(textOf(bad2)).toContain("Only 'v8' is accepted");
     expect(send.mock.calls.filter((c) => c[0] === 'Tracing.start')).toHaveLength(1); // no second start emitted
+  });
+
+  it('perf_start with v8 records the escalation and advertises interaction capture', async () => {
+    const { ctx, perfTraces } = makeCtx();
+    const res = await registry.dispatch('observe', args({ action: 'perf_start', categories: ['v8'] }), ctx);
+    expect(perfTraces.get('sess1')!.escalated).toBe(true);
+    expect(textOf(res)).toContain('Interact with the page');
+    expect(textOf(res)).toContain('interaction latency');
+  });
+
+  it('perf_stop surfaces interaction insights end-to-end when EventTiming was captured', async () => {
+    const { ctx, send, perfTraces } = makeCtx();
+    send.mockImplementation(async (method: string) => {
+      if (method === 'Tracing.end') {
+        const rec = perfTraces.get('sess1');
+        if (rec) rec.completed = true;
+      }
+      return {};
+    });
+    await registry.dispatch('observe', args({ action: 'perf_start', categories: ['v8'] }), ctx);
+    appendTraceChunk(perfTraces.get('sess1')!, [eventTimingEvent(500_000, 'keydown', 144.4, 10, 154.4)]);
+    const res = await registry.dispatch('observe', args({ action: 'perf_stop' }), ctx);
+    expect(textOf(res)).toContain('Interaction latency');
+    expect(textOf(res)).toContain('keydown — dur 144.4ms');
   });
 
   it('perf_stop without perf_start gives the established actionable error', async () => {
@@ -226,6 +254,46 @@ describe('trace-insights — aggregation semantics (fixtures from the probe evid
     appendTraceChunk(rec, [{ name: 'Overflow' }]);
     expect(rec.events).toHaveLength(TRACE_EVENT_CAP);
     expect(rec.truncated).toBe(true);
+  });
+});
+
+describe('WSB — EventTiming / INP interaction insights', () => {
+  const base = { url: null, startedAt: 0, stoppedAt: 5000, dataLoss: false, truncated: false, completed: true };
+
+  it('renders the top 3 interactions by duration with processing windows', () => {
+    const ins = aggregateTraceInsights([
+      eventTimingEvent(1000, 'keydown', 120.5, 10, 130.5),
+      eventTimingEvent(2000, 'pointerdown', 300.2, 20, 320.2),
+      eventTimingEvent(3000, 'click', 40, 5, 45),
+      eventTimingEvent(4000, 'keydown', 200, 8, 208),
+    ], { ...base, v8Category: true });
+    expect(ins.eventTimingCount).toBe(4);
+    expect(ins.output).toContain('Interaction latency — EventTiming top 3 of 4');
+    const lines = ins.output.split('\n').filter((l) => l.startsWith('- ') && / dur /.test(l));
+    expect(lines[0]).toContain('pointerdown — dur 300.2ms');
+    expect(lines[1]).toContain('keydown — dur 200.0ms');
+    expect(lines[2]).toContain('keydown — dur 120.5ms');
+    expect(lines[0]).toContain('processing 20.0–320.2ms');
+  });
+
+  it('v8 on but no interactions → honest input-gated guidance', () => {
+    const out = aggregateTraceInsights([shiftEvent(1000, 0.01)], { ...base, v8Category: true }).output;
+    expect(out).toContain('v8 category was on but no EventTiming events');
+    expect(out).toContain('interact with the page');
+  });
+
+  it('v8 off → states the required escalation + real input', () => {
+    const out = aggregateTraceInsights([shiftEvent(1000, 0.01)], { ...base, v8Category: false }).output;
+    expect(out).toContain("requires categories: ['v8'] and real input");
+  });
+
+  it('malformed EventTiming events (no dur) are ignored and count as absent', () => {
+    const ins = aggregateTraceInsights(
+      [{ name: 'EventTiming', ts: 1, args: { data: { type: 'keydown' } } }],
+      { ...base, v8Category: true },
+    );
+    expect(ins.eventTimingCount).toBe(0);
+    expect(ins.output).toContain('no EventTiming events');
   });
 });
 
