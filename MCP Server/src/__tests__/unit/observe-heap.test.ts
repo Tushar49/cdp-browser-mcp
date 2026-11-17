@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerObserveTools } from '../../tools/observe.js';
-import { TempFileManager } from '../../utils/temp-files.js';
+import { TempFileManager, TempStreamWriter } from '../../utils/temp-files.js';
 import { summarizeHeapSnapshot } from '../../utils/heap-insights.js';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
@@ -286,6 +286,26 @@ describe('WS11 — observe heap_dump/heap_summary wiring', () => {
     expect(text).toMatch(/\.heapsnapshot(?:\s|$|)/);
     expect(heapDumps.has('sess1')).toBe(false);
     void send;
+  });
+
+  it('finalize failure returns actionable text and still clears the session state', async () => {
+    const { ctx, send, heapDumps } = makeCtx();
+    send.mockImplementationOnce(async () => {
+      const dump = heapDumps.get('sess1');
+      dump!.writer.write(buildSnapshot().slice(0, 200));
+      return {};
+    });
+    const spy = vi.spyOn(TempStreamWriter.prototype, 'finalize').mockImplementationOnce(() => {
+      throw new Error('rename failed');
+    });
+    try {
+      const res = await registry.dispatch('observe', args({ action: 'heap_dump', confirm: true }), ctx);
+      expect(textOf(res)).toContain('could not be finalized');
+      expect(textOf(res)).toContain('.partial');
+      expect(heapDumps.has('sess1')).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('session death between start and snapshot completion reports dump LOST + .partial orphan stays', async () => {
