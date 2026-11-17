@@ -44,4 +44,3 @@ jobs:
       - name: Test
         working-directory: MCP Server
         run: pnpm run test
-        continue-on-error: true  # Tests may need browser, skip in CI for now

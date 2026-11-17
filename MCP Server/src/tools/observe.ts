@@ -468,9 +468,12 @@ async function handlePerfStop(
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  ctx.perfTraces.delete(sess);
+  // Finalize the raw dump BEFORE pruning session state: finalizeRawTrace
+  // swallows filesystem errors into rec.rawError, but pruning first would
+  // lose that diagnosis if anything throws between the two.
   const rawBytes = rec.rawWriter?.byteCount ?? 0;
   const rawPath = finalizeRawTrace(rec);
+  ctx.perfTraces.delete(sess);
   const insight = aggregateTraceInsights(rec.events, {
     url: rec.url,
     startedAt: rec.startedAt,
@@ -533,15 +536,22 @@ async function handleHeapDump(
     return fail(`Heap dump lost — the session ended before the snapshot completed (${(err as Error).message}). The partial artifact stays on disk as a *.partial file (clean_temp removes it). Retry heap_dump if the tab is still open.`);
   }
 
+  const byteCount = writer.byteCount;
   ctx.heapDumps.delete(sess);
-  if (writer.byteCount === 0) {
+  if (byteCount === 0) {
     writer.abandon();
     return fail('Heap dump produced zero bytes — no snapshot chunks arrived (unsupported on this browser?). Retry on a live tab.');
   }
-  const finalPath = writer.finalize();
+  let finalPath: string;
+  try {
+    finalPath = writer.finalize();
+  } catch (err: unknown) {
+    writer.abandon();
+    return fail(`Heap dump could not be finalized (${(err as Error).message}). The *.partial file stays on disk (clean_temp removes it).`);
+  }
   return ok([
     `Heap dump complete: ${finalPath}`,
-    `size: ${(writer.byteCount / 1048576).toFixed(1)}MB | snapshot live-tested: parsed offline by observe heap_summary (path param above).`,
+    `size: ${(byteCount / 1048576).toFixed(1)}MB | snapshot live-tested: parsed offline by observe heap_summary (path param above).`,
     'Lifecycle: the file stays until cleanup clean_temp removes it — nothing auto-deletes user disk state.',
     'Privacy note: heap dumps can carry auth-state material from page JS (cookies, tokens in closures). Handle the file accordingly.',
   ].join('\n'));

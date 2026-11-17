@@ -2,6 +2,17 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
+## [5.5.2] - 2026-11-17
+
+### Fixed
+- **Browser discovery parsed Windows command lines only on Windows** — `parseBrowserCommandLine` used Node's host-platform `basename`, so a Windows executable path fed on a POSIX host (the Linux CI runner) produced no browser name. The parser now splits on both `\` and `/` regardless of host OS; portable and POSIX paths parse identically.
+- **`observe heap_dump` finalize failures are now actionable** — a rename failure returns a message naming the `*.partial` orphan (removed only by `clean_temp`) and still clears the per-session dump state instead of escaping to the generic error wrapper.
+- **`observe perf_stop` finalizes the raw trace before pruning state** — ordering fix so a finalize diagnosis cannot be lost.
+- **`interact click` JS fallback no longer depends on `DOM.describeNode`** — the CDP-click failure path clicks the already-resolved `objectId` on the element's session, so the fallback works even when a `backendNodeId` lookup would have failed. The force-JS path still resolves its backend node on demand.
+
+### Changed
+- **CI now enforces the unit test step** — removed `continue-on-error` from the Test step. The unit suite (`vitest run`, unit tree only) is platform-clean after the parser fix, so a failing test now fails CI instead of annotating a green run. Integration/benchmark suites remain out of CI (they need a live browser).
+
 ## [5.5.1] - 2026-11-17
 
 ### Fixed

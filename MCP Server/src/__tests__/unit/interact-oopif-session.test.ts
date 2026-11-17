@@ -23,6 +23,8 @@ interface RecordedCall {
 interface MockOptions {
   /** When false, no uid routes to a child session (all same-page). */
   oopif?: boolean;
+  /** Make the CDP mousePressed dispatch throw (forces the JS fallback). */
+  failMouseClick?: boolean;
 }
 
 function makeCtx(opts: MockOptions = {}) {
@@ -38,6 +40,9 @@ function makeCtx(opts: MockOptions = {}) {
     sessionId?: string,
   ): Promise<unknown> => {
     calls.push({ method, params, sessionId });
+    if (method === 'Input.dispatchMouseEvent' && params.type === 'mousePressed' && opts.failMouseClick) {
+      throw new Error('Element is not interactable');
+    }
     switch (method) {
       case 'DOM.resolveNode':
         return { object: { objectId: objectFor(params.backendNodeId) } };
@@ -77,6 +82,7 @@ function makeCtx(opts: MockOptions = {}) {
     sendCommand,
     cdpClient: {},
     config: { autoWait: false, actionTimeout: 500 },
+    networkReqs: new Map(),
     tabSessions: {
       getSession: async () => 'page-sess',
       getRefSession: (_sess: string, uid: number) =>
@@ -235,6 +241,23 @@ describe('5.5.1 interact — iframe/OOPIF session routing', () => {
     const pageFill = fills.find((c) => c.params.objectId === 'obj-2');
     expect(childFill?.sessionId).toBe('child-sess');
     expect(pageFill?.sessionId).toBe('page-sess');
+  });
+
+  it('CDP click failure falls back to a JS click on the resolved objectId (no describeNode)', async () => {
+    const { ctx, calls } = makeCtx({ failMouseClick: true });
+    const res = await registry.dispatch(
+      'interact',
+      { action: 'click', tabId: 'tab-1', uid: 42, force: true },
+      ctx,
+    );
+    expect(textOf(res)).toContain('Clicked (JS fallback)');
+
+    const fallback = calls.find(
+      (c) => c.method === 'Runtime.callFunctionOn' && fnText(c).includes('this.click()'),
+    );
+    expect(fallback?.sessionId).toBe('child-sess');
+    expect(fallback?.params.objectId).toBe('obj-1');
+    expect(calls.some((c) => c.method === 'DOM.describeNode')).toBe(false);
   });
 
   it('select custom-dropdown probe and follow-up both use the element session', async () => {

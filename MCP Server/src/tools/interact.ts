@@ -251,14 +251,13 @@ async function handleClick(ctx: ServerContext, args: InteractArgs): Promise<Tool
     retryTimeout,
   );
 
-  // Resolve backendNodeId for potential JS-click fallback
   const { objectId, resolvedSession } = await resolveElementObjectId(ctx, sess, args.uid, args.selector, args.tabId);
-  const { node } = await ctx.sendCommand('DOM.describeNode', { objectId }, resolvedSession) as {
-    node: { backendNodeId: number };
-  };
 
   // Force JS click — skip CDP mouse events entirely
   if (args.jsClick) {
+    const { node } = await ctx.sendCommand('DOM.describeNode', { objectId }, resolvedSession) as {
+      node: { backendNodeId: number };
+    };
     await jsClickElement(ctx, resolvedSession, node.backendNodeId);
     const waitSuffixJs = args.waitFor
       ? await runClickWaitFor(ctx, sess, args.waitFor, retryTimeout)
@@ -309,8 +308,14 @@ async function handleClick(ctx: ServerContext, args: InteractArgs): Promise<Tool
       : '';
     return ok(slimify(`Clicked <${el.tag}> "${el.label}" at (${Math.round(el.x)}, ${Math.round(el.y)})${netSuffix}${waitSuffix}`, 'Clicked'));
   } catch {
-    // CDP click failed (element not interactable) — fallback to JS click
-    await jsClickElement(ctx, resolvedSession, node.backendNodeId);
+    // CDP click failed (not interactable, or the element moved) — fall back to
+    // a JS click on the SAME resolved objectId. Using the objectId keeps the
+    // fallback alive even when a backendNodeId lookup would have failed.
+    await ctx.sendCommand('Runtime.callFunctionOn', {
+      functionDeclaration: 'function() { this.click(); }',
+      objectId,
+      returnByValue: true,
+    }, resolvedSession);
     const netEvents2 = await waitForNetworkSettle(ctx, sess, 2000);
     const netSuffix2 = netEvents2.length > 0 ? `\nNetwork: ${netEvents2.length} request(s) completed` : '';
     const waitSuffix2 = args.waitFor

@@ -34,6 +34,15 @@ describe('parseBrowserCommandLine()', () => {
     expect(info.userDataDir).toBe('A:\\dir with spaces');
   });
 
+  it('handles POSIX paths on any host platform', () => {
+    const info = parseBrowserCommandLine(
+      '/usr/bin/brave-browser --user-data-dir=/home/u/.config/BraveSoftware --remote-debugging-port=9222',
+    );
+    expect(info.browserName).toBe('brave');
+    expect(info.userDataDir).toBe('/home/u/.config/BraveSoftware');
+    expect(info.port).toBe(9222);
+  });
+
   it('toggle-mode launch line: dir present, port absent', () => {
     const info = parseBrowserCommandLine(
       'brave.exe --user-data-dir=A:\\portable\\data --disable-brave-update',

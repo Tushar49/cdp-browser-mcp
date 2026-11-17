@@ -7,7 +7,7 @@
 
 import { execFile } from 'child_process';
 import { readFileSync } from 'fs';
-import { join, basename } from 'path';
+import { join } from 'path';
 import { platform, homedir } from 'os';
 import type { BrowserInstance, ProfileInfo } from '../types.js';
 
@@ -299,7 +299,11 @@ export function parseBrowserCommandLine(cmd: string): CommandLineInfo {
     ? exeMatch[1] ?? exeMatch[2] ?? exeMatch[3]
     : ''
   ).toLowerCase();
-  const base = basename(firstToken).replace(/\.exe$/, '');
+  // Basename from EITHER separator regardless of host OS: command lines can be
+  // parsed off-platform (and CI feeds Windows paths on Linux). Node's
+  // `path.basename` only splits on the host separator.
+  const exeName = firstToken.split(/[\\/]/).pop() ?? firstToken;
+  const base = exeName.replace(/\.exe$/, '');
   const browserName = KNOWN_BROWSERS.find((n) => base === n || base.startsWith(`${n}-`));
 
   const info: CommandLineInfo = {};
