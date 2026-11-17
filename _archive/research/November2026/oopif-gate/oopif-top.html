@@ -1,0 +1,15 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>OOPIF gate — top</title></head>
+<body>
+  <h1>OOPIF gate top document</h1>
+  <div id="status">waiting for child</div>
+  <iframe id="oop" src="http://127.0.0.2:8881/oopif-inner.html" width="640" height="220"></iframe>
+  <script>
+    // No <input> in the TOP document: a top-session instant fill has nothing
+    // to hit, so any value that lands in the child input proves child routing.
+    window.__msgs = [];
+    window.addEventListener('message', function (e) { window.__msgs.push(e.data); });
+  </script>
+</body>
+</html>

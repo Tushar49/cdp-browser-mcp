@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>OOPIF gate — inner</title></head>
+<body>
+  <form id="f">
+    <label for="target">Target</label>
+    <input id="target" name="target" autocomplete="off">
+    <button type="submit">Go</button>
+  </form>
+  <script>
+    window.__log = [];
+    window.__submitted = false;
+    var input = document.getElementById('target');
+    input.addEventListener('keydown', function (e) {
+      window.__log.push('key:' + e.key);
+      parent.postMessage({ type: 'key', key: e.key }, '*');
+    });
+    input.addEventListener('input', function (e) {
+      parent.postMessage({ type: 'input', value: e.target.value }, '*');
+    });
+    document.getElementById('f').addEventListener('submit', function (e) {
+      e.preventDefault();
+      window.__submitted = true;
+      parent.postMessage({ type: 'submit', value: input.value }, '*');
+    });
+    parent.postMessage({ type: 'ready' }, '*');
+  </script>
+</body>
+</html>
