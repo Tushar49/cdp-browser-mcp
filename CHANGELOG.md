@@ -2,6 +2,11 @@
 
 All notable changes to CDP Browser MCP Server will be documented in this file.
 
+## [5.5.1] - 2026-11-17
+
+### Fixed
+- **`interact type` typed into the wrong frame for iframe elements** — `handleType` resolved and focused a uid in its owning CDP session (for a cross-origin/out-of-process iframe, the child session) but dispatched every key event on the top-level page session, and its instant-fill path read `document.activeElement` in the top document (which is the `<iframe>` element). Typing could therefore land in the wrong element or nowhere, silently reporting success. All element-scoped commands now use the resolved session: typo/backspace/char and fixed-delay key dispatch, submit Enter, and the instant fill. The instant fill is now object-bound via `Runtime.callFunctionOn` on the resolved objectId (native value setter, contentEditable `insertText`, `input`+`change` preserved) instead of reading `document.activeElement`. The same wrong-session lookup was fixed in `interact select`'s custom-dropdown option fallback. Chromium registers `InputHandler` on iframe agent hosts, so key events are dispatched directly to the child session rather than relying on top-frame focus routing. Same-origin and main-frame behavior is unchanged; no schema or API change.
+
 ## [5.5.0] - 2026-11-11
 
 ### Added
