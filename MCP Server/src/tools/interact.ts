@@ -377,6 +377,10 @@ async function handleType(ctx: ServerContext, args: InteractArgs): Promise<ToolR
     returnByValue: true,
   }, resolvedSession);
 
+  // All element-scoped traffic (DOM/Runtime/Input) targets the element's own
+  // session. For a uid inside an iframe that is the child CDP session; a
+  // Chromium iframe agent host registers InputHandler, so key events are
+  // dispatched directly there rather than relying on top-frame focus routing.
   if (args.charDelay || args.wordDelay) {
     // Human-like typing: randomized per-char and per-word delays
     const charBase = args.charDelay || 200;
@@ -388,26 +392,26 @@ async function handleType(ctx: ServerContext, args: InteractArgs): Promise<ToolR
         const wrongChar = getAdjacentKey(char);
         await ctx.sendCommand('Input.dispatchKeyEvent', {
           type: 'keyDown', text: wrongChar, key: wrongChar, unmodifiedText: wrongChar,
-        }, sess);
-        await ctx.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: wrongChar }, sess);
+        }, resolvedSession);
+        await ctx.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: wrongChar }, resolvedSession);
         await sleep(randomDelay(charBase * 2)); // pause — "noticing" the mistake
 
         const bk = resolveKey('Backspace');
         await ctx.sendCommand('Input.dispatchKeyEvent', {
           type: 'keyDown', key: bk.key, code: bk.code,
           windowsVirtualKeyCode: bk.keyCode, nativeVirtualKeyCode: bk.keyCode,
-        }, sess);
+        }, resolvedSession);
         await ctx.sendCommand('Input.dispatchKeyEvent', {
           type: 'keyUp', key: bk.key, code: bk.code,
           windowsVirtualKeyCode: bk.keyCode, nativeVirtualKeyCode: bk.keyCode,
-        }, sess);
+        }, resolvedSession);
         await sleep(randomDelay(charBase * 0.5));
       }
 
       await ctx.sendCommand('Input.dispatchKeyEvent', {
         type: 'keyDown', text: char, key: char, unmodifiedText: char,
-      }, sess);
-      await ctx.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: char }, sess);
+      }, resolvedSession);
+      await ctx.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: char }, resolvedSession);
 
       if (char === ' ' || char === '\t') {
         await sleep(randomDelay(wordBase));
@@ -422,40 +426,42 @@ async function handleType(ctx: ServerContext, args: InteractArgs): Promise<ToolR
     for (const char of args.text) {
       await ctx.sendCommand('Input.dispatchKeyEvent', {
         type: 'keyDown', text: char, key: char, unmodifiedText: char,
-      }, sess);
-      await ctx.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: char }, sess);
+      }, resolvedSession);
+      await ctx.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: char }, resolvedSession);
       await sleep(args.delay);
     }
   } else {
-    // Instant fill using nativeInputValueSetter for React/Angular compatibility
-    await ctx.sendCommand('Runtime.evaluate', {
-      expression: `(() => {
-        const el = document.activeElement;
-        if (!el) return;
-        const val = ${JSON.stringify(args.text)};
-        if ('value' in el) {
+    // Instant fill: bind to the resolved objectId (never top-frame
+    // document.activeElement) so iframe elements are filled in their own
+    // session. Mirrors handleFill's native-setter semantics.
+    await ctx.sendCommand('Runtime.callFunctionOn', {
+      functionDeclaration: `function(val) {
+        if ('value' in this) {
           const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
                             || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-          if (nativeSetter) nativeSetter.call(el, val);
-          else el.value = val;
-        } else if (el.isContentEditable) {
+          if (nativeSetter) nativeSetter.call(this, val);
+          else this.value = val;
+        } else if (this.isContentEditable) {
           document.execCommand('insertText', false, val);
         }
-        el.dispatchEvent(new Event('input', {bubbles:true}));
-        el.dispatchEvent(new Event('change', {bubbles:true}));
-      })()`,
-    }, sess);
+        this.dispatchEvent(new Event('input', {bubbles:true}));
+        this.dispatchEvent(new Event('change', {bubbles:true}));
+      }`,
+      objectId,
+      arguments: [{ value: args.text }],
+      returnByValue: true,
+    }, resolvedSession);
   }
 
   if (args.submit) {
     const k = resolveKey('Enter');
     await ctx.sendCommand('Input.dispatchKeyEvent', {
       type: 'keyDown', ...k,
-    }, sess);
+    }, resolvedSession);
     await ctx.sendCommand('Input.dispatchKeyEvent', {
       type: 'keyUp', key: k.key, code: k.code,
       windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode,
-    }, sess);
+    }, resolvedSession);
   }
 
   const display = args.text.length > 60 ? args.text.substring(0, 60) + '...' : args.text;
@@ -594,7 +600,7 @@ async function handleSelect(ctx: ServerContext, args: InteractArgs): Promise<Too
         return { error: "Option not found in custom dropdown: " + val + ". Visible options: " + Array.from(options).slice(0, 10).map(o => o.textContent.trim()).join(", ") };
       })()`,
       returnByValue: true,
-    }, sess) as { result: { value: Record<string, unknown> } };
+    }, resolvedSession) as { result: { value: Record<string, unknown> } };
 
     const cv = clickResult.result.value;
     if (cv?.error) return fail(String(cv.error));
